@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,9 +112,14 @@ class FluorescenceDuplicateDetector:
         self,
         pages: list[FluorescencePage],
         excluded_page_pairs: set[tuple[str, str]] | None = None,
+        checkpoint: Callable[[], None] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
-        for first_index, second_index in sorted(_candidate_pairs(pages)):
+        for candidate_index, (first_index, second_index) in enumerate(
+            sorted(_candidate_pairs(pages))
+        ):
+            if checkpoint and candidate_index % 64 == 0:
+                checkpoint()
             first = pages[first_index]
             second = pages[second_index]
             if excluded_page_pairs and _page_pair_key(first, second) in excluded_page_pairs:

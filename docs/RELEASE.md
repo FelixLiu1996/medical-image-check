@@ -32,9 +32,10 @@
 1. 安装锁定的运行、测试和 Nuitka 构建依赖。
 2. 运行 Ruff 与 pytest。
 3. 按 `pysidedeploy.spec` 构建 standalone 目录。
-4. 运行打包程序 `--smoke-test`。
+4. 运行打包程序 `--smoke-test`，实际生成并校验 Excel、HTML、PDF 三种临时报告。
 5. 收集项目许可证、第三方登记表及实际 wheel 的许可证文件。
-6. 生成免安装 ZIP、SHA-256 文件并上传为保留 14 天的 Actions 工件。
+6. 收集 ReportLab、Pillow、charset-normalizer 等报告依赖的实际 wheel 许可证。
+7. 生成免安装 ZIP、SHA-256 文件并上传为保留 14 天的 Actions 工件。
 
 该工作流目前由影响发行物的 `codex/**` 开发分支推送、手动操作或 `v*` 标签触发，不自动创建 GitHub Release。纯文档或测试说明变更不会重复执行高成本编译。开发分支触发用于工作流尚未合并到默认分支前的首轮验证，稳定后可进一步收紧。Windows 安装程序尚未实现，免安装包仍需干净 Windows 10/11 人工验证后才能作为正式发行物。
 

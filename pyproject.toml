@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medical-image-check"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Local duplicate detection for medical research images and spreadsheet data"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -17,6 +17,7 @@ dependencies = [
   "opencv-python-headless==4.14.0.94",
   "openpyxl==3.1.5",
   "PySide6_Essentials==6.11.2",
+  "reportlab==4.4.9",
   "xlrd==2.0.2",
 ]
 
@@ -61,6 +62,9 @@ files = [
   "src/medical_image_check/services/__init__.py",
   "src/medical_image_check/services/basic_scan.py",
   "src/medical_image_check/services/excel_report.py",
+  "src/medical_image_check/services/html_report.py",
+  "src/medical_image_check/services/pdf_report.py",
+  "src/medical_image_check/services/report_common.py",
   "src/medical_image_check/ui/__init__.py",
   "src/medical_image_check/ui/main_window.py",
 ]

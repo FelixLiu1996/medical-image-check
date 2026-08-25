@@ -44,11 +44,14 @@ class ExactExcelDuplicateDetector:
         self,
         paths: Iterable[Path],
         on_file: Callable[[Path], None] | None = None,
+        checkpoint: Callable[[], None] | None = None,
     ) -> tuple[list[Finding], list[ScanIssue]]:
         cells: list[NumericCell] = []
         issues: list[ScanIssue] = []
 
         for path in paths:
+            if checkpoint:
+                checkpoint()
             try:
                 result = self._reader.read(path)
                 cells.extend(result.cells)
@@ -62,10 +65,18 @@ class ExactExcelDuplicateDetector:
                 if on_file:
                     on_file(path)
 
+        if checkpoint:
+            checkpoint()
         findings = self._find_value_duplicates(cells)
         findings.extend(self._find_row_duplicates(cells))
+        if checkpoint:
+            checkpoint()
         findings.extend(self._find_digit_fragment_duplicates(cells))
+        if checkpoint:
+            checkpoint()
         findings.extend(find_advanced_excel_findings(cells))
+        if checkpoint:
+            checkpoint()
         findings.sort(
             key=lambda item: (
                 {RiskLevel.HIGH: 0, RiskLevel.MEDIUM: 1, RiskLevel.LOW: 2}[item.risk],

@@ -45,7 +45,7 @@ jobs:
         run: |
           $app = "build/release/MedicalImageCheck.dist"
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES.md $app
-          python scripts/collect_licenses.py "$app/licenses" PySide6_Essentials shiboken6 openpyxl et_xmlfile xlrd numpy opencv-python-headless Nuitka
+          python scripts/collect_licenses.py "$app/licenses" PySide6_Essentials shiboken6 openpyxl et_xmlfile xlrd numpy opencv-python-headless reportlab Pillow charset-normalizer Nuitka
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path "$app/*" -DestinationPath "dist/MedicalImageCheck-windows-x64-portable.zip" -Force
           $hash = (Get-FileHash "dist/MedicalImageCheck-windows-x64-portable.zip" -Algorithm SHA256).Hash.ToLower()

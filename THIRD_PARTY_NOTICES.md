@@ -20,6 +20,9 @@
 | xlrd | 2.0.2 | xls 只读解析 | https://xlrd.readthedocs.io/ | BSD-style，多项声明 | 不适用 | 是 | 保留发行包内完整 LICENSE | 已接受 |
 | NumPy | 2.5.2 | 图像数组、指纹和相似度计算 | https://numpy.org/ | BSD-3-Clause 及随包登记的宽松第三方许可证 | 不适用 | 是 | 自动收集 wheel 中 LICENSE 清单 | 已接受 |
 | opencv-python-headless / OpenCV | 4.14.0.94 | 图片解码、多页 TIFF、缩放、DCT 和几何变换 | https://github.com/opencv/opencv-python | wheel 构建脚本 MIT；OpenCV Apache-2.0；wheel 含其他第三方组件 | 不适用 | 是 | 必须随包提供 `LICENSE.txt` 和 `LICENSE-3RD-PARTY.txt`；正式发行前复核 FFmpeg 等二进制声明 | 有条件接受，发行前复核 |
+| ReportLab | 4.4.9 | 本地生成中文 PDF 报告 | https://www.reportlab.com/dev/docs/ | BSD-style | 不适用 | 是 | 保留发行包内 `LICENSE.txt` | 已接受 |
+| Pillow | 12.3.0 | ReportLab 图像支持依赖 | https://python-pillow.org/ | MIT-CMU | 不适用 | 是 | 保留发行包内许可证 | 已接受 |
+| charset-normalizer | 3.5.0 | ReportLab 文本编码依赖 | https://github.com/jawah/charset_normalizer | MIT | 不适用 | 是 | 保留发行包内许可证 | 已接受 |
 | Nuitka | 4.1.1 | Windows standalone 构建 | https://nuitka.net/ | 编译器 AGPL-3.0；输出所含 Runtime Library 带 Nuitka Runtime Library Exception 1.0 | 不适用 | 仅构建工具；输出包含其 runtime | 随包提供 AGPL 文本和 Runtime Library Exception；该例外明确允许非 AGPL 目标程序按自选条款分发 | 有条件接受，发行前复核 |
 | xlwt | 1.3.0 | 自动化测试中生成合成 xls | https://xlwt.readthedocs.io/ | BSD-style | 不适用 | 否 | 开发依赖 | 已接受 |
 | pytest / pytest-cov | 9.1.1 / 7.0.0 | 自动化测试 | https://pytest.org/ | MIT | 不适用 | 否 | 开发依赖 | 已接受 |

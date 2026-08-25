@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,11 +101,16 @@ class PathologyDuplicateDetector:
         self,
         regions: list[PathologyRegion],
         excluded_page_pairs: set[tuple[str, str]] | None = None,
+        checkpoint: Callable[[], None] | None = None,
     ) -> list[Finding]:
         best_by_page_pair: dict[
             tuple[str, str], tuple[PathologyRegion, PathologyRegion, _PathologyMatch]
         ] = {}
-        for first_index, second_index in sorted(_candidate_pairs(regions)):
+        for candidate_index, (first_index, second_index) in enumerate(
+            sorted(_candidate_pairs(regions))
+        ):
+            if checkpoint and candidate_index % 64 == 0:
+                checkpoint()
             first = regions[first_index]
             second = regions[second_index]
             page_pair = _page_pair_key(first, second)

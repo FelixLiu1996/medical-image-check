@@ -57,6 +57,7 @@ class ImageDuplicateDetector:
         self,
         paths: Iterable[Path],
         on_file: Callable[[Path], None] | None = None,
+        checkpoint: Callable[[], None] | None = None,
     ) -> tuple[list[Finding], list[ScanIssue]]:
         file_hashes: dict[str, list[Path]] = defaultdict(list)
         features: list[ImageFeature] = []
@@ -66,6 +67,8 @@ class ImageDuplicateDetector:
         issues: list[ScanIssue] = []
 
         for path in paths:
+            if checkpoint:
+                checkpoint()
             try:
                 data = path.read_bytes()
                 pages = decode_image_pages(path, data)
@@ -83,22 +86,42 @@ class ImageDuplicateDetector:
                 if on_file:
                     on_file(path)
 
+        if checkpoint:
+            checkpoint()
         findings, exact_pairs = self._file_findings(file_hashes)
         pixel_findings, pixel_pairs = self._pixel_findings(features, file_hashes)
         findings.extend(pixel_findings)
         exact_pairs.update(pixel_pairs)
         source_duplicate_pairs = set(exact_pairs)
-        perceptual_findings, perceptual_pairs = self._perceptual_findings(features, exact_pairs)
+        perceptual_findings, perceptual_pairs = self._perceptual_findings(
+            features,
+            exact_pairs,
+            checkpoint,
+        )
         findings.extend(perceptual_findings)
         exact_pairs.update(perceptual_pairs)
-        findings.extend(self._local_findings(features, exact_pairs))
+        findings.extend(self._local_findings(features, exact_pairs, checkpoint))
         findings.extend(
-            self._fluorescence_detector.findings(fluorescence_pages, source_duplicate_pairs)
+            self._fluorescence_detector.findings(
+                fluorescence_pages,
+                source_duplicate_pairs,
+                checkpoint,
+            )
         )
         findings.extend(
-            self._pathology_detector.findings(pathology_regions, source_duplicate_pairs)
+            self._pathology_detector.findings(
+                pathology_regions,
+                source_duplicate_pairs,
+                checkpoint,
+            )
         )
-        findings.extend(self._western_detector.findings(western_regions, source_duplicate_pairs))
+        findings.extend(
+            self._western_detector.findings(
+                western_regions,
+                source_duplicate_pairs,
+                checkpoint,
+            )
+        )
         return findings, issues
 
     def _file_findings(
@@ -175,10 +198,13 @@ class ImageDuplicateDetector:
         self,
         features: list[ImageFeature],
         exact_pairs: set[tuple[str, str]],
+        checkpoint: Callable[[], None] | None = None,
     ) -> tuple[list[Finding], set[tuple[str, str]]]:
         findings: list[Finding] = []
         matched_pairs: set[tuple[str, str]] = set()
-        for first_index, second_index in _candidate_pairs(features):
+        for candidate_index, (first_index, second_index) in enumerate(_candidate_pairs(features)):
+            if checkpoint and candidate_index % 128 == 0:
+                checkpoint()
             first = features[first_index]
             second = features[second_index]
             pair_key = _feature_pair_key(
@@ -237,9 +263,13 @@ class ImageDuplicateDetector:
         self,
         features: list[ImageFeature],
         excluded_pairs: set[tuple[str, str]],
+        checkpoint: Callable[[], None] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
-        for first_index, second_index in sorted(_local_candidate_pairs(features, excluded_pairs)):
+        candidates = sorted(_local_candidate_pairs(features, excluded_pairs))
+        for candidate_index, (first_index, second_index) in enumerate(candidates):
+            if checkpoint and candidate_index % 64 == 0:
+                checkpoint()
             first = features[first_index]
             second = features[second_index]
             match = _geometric_match(first, second)

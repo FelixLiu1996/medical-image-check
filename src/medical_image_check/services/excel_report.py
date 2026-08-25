@@ -9,50 +9,18 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from medical_image_check import __version__
-from medical_image_check.domain.models import FindingType, ReviewStatus, RiskLevel, ScanResult
+from medical_image_check.domain.models import RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
+from medical_image_check.services.report_common import (
+    CHANNEL_LABELS,
+    EVIDENCE_KIND_LABELS,
+    RELATIONSHIP_LABELS,
+    REVIEW_LABELS,
+    RISK_LABELS,
+    TYPE_LABELS,
+)
 
 REPORT_SCHEMA_VERSION = 1
-
-RISK_LABELS = {
-    RiskLevel.HIGH: "高",
-    RiskLevel.MEDIUM: "中",
-    RiskLevel.LOW: "低",
-}
-TYPE_LABELS = {
-    FindingType.EXACT_DUPLICATE: "确认重复",
-    FindingType.SUSPECTED_REUSE: "疑似复用",
-    FindingType.HIGH_SIMILARITY: "高度相似",
-    FindingType.NORMAL_RELATION: "正常关联",
-    FindingType.STATISTICAL_ANOMALY: "统计异常",
-}
-REVIEW_LABELS = {
-    ReviewStatus.PENDING: "待复核",
-    ReviewStatus.CONFIRMED: "确认重复",
-    ReviewStatus.NORMAL: "正常关联",
-    ReviewStatus.FALSE_POSITIVE: "误报",
-}
-EVIDENCE_KIND_LABELS = {
-    "western_blot": "Western blot",
-    "fluorescence": "荧光",
-    "pathology": "病理",
-}
-RELATIONSHIP_LABELS = {
-    "normal_merge_component": "单通道与合并图正常关系",
-    "normal_same_field_channels": "不同通道同视野正常关系",
-    "suspected_same_channel_reuse": "同通道疑似复用",
-    "normal_different_magnification": "不同倍率正常关系",
-    "suspected_pathology_reuse": "组织区域疑似复用",
-}
-CHANNEL_LABELS = {
-    "blue": "蓝色通道",
-    "green": "绿色通道",
-    "red": "红色通道",
-    "far_red": "远红通道",
-    "gray": "灰度通道",
-    "merge": "合并图",
-    "unknown": "未识别",
-}
 
 
 class ExcelReportExporter:

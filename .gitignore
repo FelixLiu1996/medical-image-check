@@ -15,3 +15,5 @@ dist/
 *.mic-project
 *.mdup-project
 reports/
+tmp/
+output/

@@ -19,6 +19,9 @@ def test_main_window_can_be_created_offscreen() -> None:
     window = MainWindow()
 
     assert "医学实验图像与数据查重" in window.windowTitle()
+    assert window._pause_button.text() == "暂停"
+    assert not window._pause_button.isEnabled()
+    assert not window._cancel_button.isEnabled()
 
     window.close()
     app.processEvents()
@@ -38,6 +41,8 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     window._show_result(ScanResult(1, 1, 0, (), ()))
     window.save_project()
     report = window.export_excel_report(tmp_path / "ui-report.xlsx")
+    html_report = window.export_html_report(tmp_path / "ui-report.html")
+    pdf_report = window.export_pdf_report(tmp_path / "ui-report.pdf")
 
     restored = MainWindow()
     restored.open_project(project_path)
@@ -51,6 +56,10 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     assert restored._western_single_band_check.isChecked()
     assert restored._current_result == ScanResult(1, 1, 0, (), ())
     assert report.exists()
+    assert html_report.exists()
+    assert pdf_report.exists()
+    assert str(html_report.resolve()) in restored._project.report_paths
+    assert str(pdf_report.resolve()) in restored._project.report_paths
 
     window.close()
     restored.close()
@@ -106,6 +115,12 @@ def test_main_window_displays_local_geometric_evidence(tmp_path: Path) -> None:
     assert window._first_evidence._region == (10, 8, 60, 40)
     assert window._second_evidence._region == (5, 4, 90, 60)
     assert "几何内点：20" in window._evidence_summary.text()
+    assert window._crop_evidence_check.isEnabled()
+    window._crop_evidence_check.setChecked(True)
+    assert window._first_evidence._crop_to_region is True
+    assert window._second_evidence._crop_to_region is True
+    window._copy_evidence_button.click()
+    assert "几何内点：20" in QApplication.clipboard().text()
 
     window.close()
     app.processEvents()

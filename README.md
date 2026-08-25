@@ -40,6 +40,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 
 - Python 3.12/PySide6 Essentials 中文桌面骨架；
 - 项目新建、打开、保存、旧格式迁移和最近扫描结果恢复；
+- 后台扫描安全暂停、继续和取消；取消不会用未完成结果覆盖上一次完整扫描；
 - 图片文件 SHA-256、跨格式解码像素指纹和整体感知近似候选；
 - 多页 TIFF 逐页处理，以及旋转、翻转、压缩和缩放的全局候选；
 - ORB 局部候选索引与 RANSAC 几何验证，可检测裁剪、大图包含小图和部分重叠；
@@ -53,11 +54,12 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - Excel 连续数字片段、近似值及连续列固定倍数、偏移、目标和/积检测；
 - 项目内可调 3–12 位数字片段阈值，以及 GUI/报告结构化数值证据；
 - 隐藏工作表扫描、公式缓存缺失提示和损坏文件隔离；
-- 基础 Excel 报告，包含概览、结果、图像/数值证据、提示和项目输入；
+- Excel、单文件 HTML 和 A4 PDF 三种本地报告；HTML 支持搜索/风险筛选和内嵌图像证据，PDF 支持中文归档、打印和图像证据；
+- GUI 证据预览支持聚焦两侧匹配区域和一键复制证据摘要；
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
-当前整体感知、局部几何、Western blot、荧光、病理、Excel 近似和关系结果均需人工复核。Western blot 复杂多面板拆分、任意区域擦除/拼接，荧光实验组语义，病理连续切片语义，通用单图 Copy-Move，Excel 自定义容差/单次运算/顺序打乱/统计异常，历史库和 HTML/PDF 完整报告仍在后续里程碑。
+当前整体感知、局部几何、Western blot、荧光、病理、Excel 近似和关系结果均需人工复核。Western blot 复杂多面板拆分、任意区域擦除/拼接，荧光实验组语义，病理连续切片语义，通用单图 Copy-Move，Excel 自定义容差/单次运算/顺序打乱/统计异常、历史库和可恢复任务断点仍在后续里程碑。
 
 ## 本地开发
 

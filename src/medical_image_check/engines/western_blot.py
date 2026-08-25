@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -138,9 +138,14 @@ class WesternBlotDuplicateDetector:
         self,
         regions: list[WesternRegion],
         excluded_page_pairs: set[tuple[str, str]] | None = None,
+        checkpoint: Callable[[], None] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
-        for first_index, second_index in sorted(_candidate_pairs(regions)):
+        for candidate_index, (first_index, second_index) in enumerate(
+            sorted(_candidate_pairs(regions))
+        ):
+            if checkpoint and candidate_index % 64 == 0:
+                checkpoint()
             first = regions[first_index]
             second = regions[second_index]
             if excluded_page_pairs and _page_pair_key(first, second) in excluded_page_pairs:

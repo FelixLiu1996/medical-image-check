@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QRectF, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -16,6 +16,7 @@ from PySide6.QtGui import (
     QPen,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFileDialog,
     QGroupBox,
@@ -38,8 +39,14 @@ from medical_image_check.domain.models import EvidenceLocation, Finding, RiskLev
 from medical_image_check.domain.project import Project
 from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
-from medical_image_check.services.basic_scan import BasicScanService
+from medical_image_check.services.basic_scan import (
+    BasicScanService,
+    ScanCancelled,
+    ScanControl,
+)
 from medical_image_check.services.excel_report import ExcelReportExporter
+from medical_image_check.services.html_report import HtmlReportExporter
+from medical_image_check.services.pdf_report import PdfReportExporter
 
 PROJECT_FILTER = "医学查重项目 (*.mic-project.json)"
 RISK_LABELS = {
@@ -57,6 +64,7 @@ class ImageEvidenceView(QWidget):
         self._page = 1
         self._image = QImage()
         self._region: tuple[int, int, int, int] | None = None
+        self._crop_to_region = False
 
     def set_evidence(
         self,
@@ -68,6 +76,10 @@ class ImageEvidenceView(QWidget):
         self._page = max(1, page)
         self._image = _read_evidence_image(source_path, self._page)
         self._region = region
+        self.update()
+
+    def set_crop_to_region(self, enabled: bool) -> None:
+        self._crop_to_region = enabled
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -87,9 +99,19 @@ class ImageEvidenceView(QWidget):
             return
 
         page_text = f" · 第 {self._page} 页" if self._page > 1 else ""
+        if self._crop_to_region and self._region is not None:
+            page_text += " · 匹配区域"
         painter.drawText(8, 20, f"{Path(self._source_path).name}{page_text}")
+        display_image = self._image
+        if self._crop_to_region and self._region is not None:
+            x, y, width, height = self._region
+            x = max(0, min(x, self._image.width() - 1))
+            y = max(0, min(y, self._image.height() - 1))
+            width = max(1, min(width, self._image.width() - x))
+            height = max(1, min(height, self._image.height() - y))
+            display_image = self._image.copy(x, y, width, height)
         available = QRectF(8, 28, max(1, self.width() - 16), max(1, self.height() - 36))
-        image_ratio = self._image.width() / max(self._image.height(), 1)
+        image_ratio = display_image.width() / max(display_image.height(), 1)
         available_ratio = available.width() / max(available.height(), 1)
         if image_ratio >= available_ratio:
             target_width = available.width()
@@ -103,10 +125,11 @@ class ImageEvidenceView(QWidget):
             target_width,
             target_height,
         )
-        painter.drawImage(target, self._image)
-        painter.setPen(QPen(QColor("#e12d39"), 3))
+        painter.drawImage(target, display_image)
+        border_color = "#ffb000" if self._crop_to_region else "#e12d39"
+        painter.setPen(QPen(QColor(border_color), 3))
         painter.drawRect(target)
-        if self._region is not None:
+        if self._region is not None and not self._crop_to_region:
             x, y, width, height = self._region
             evidence_rect = QRectF(
                 target.x() + x * target.width() / self._image.width(),
@@ -122,6 +145,7 @@ class ScanWorker(QObject):
     progress = Signal(int, int, str)
     finished = Signal(object)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(
         self,
@@ -133,6 +157,7 @@ class ScanWorker(QObject):
         self._sources = sources
         self._minimum_digit_run = minimum_digit_run
         self._western_single_band_enabled = western_single_band_enabled
+        self.control = ScanControl()
 
     @Slot()
     def run(self) -> None:
@@ -140,7 +165,10 @@ class ScanWorker(QObject):
             result = BasicScanService(
                 self._minimum_digit_run,
                 self._western_single_band_enabled,
-            ).scan(self._sources, self.progress.emit)
+            ).scan(self._sources, self.progress.emit, self.control)
+        except ScanCancelled:
+            self.cancelled.emit()
+            return
         except Exception as exc:  # noqa: BLE001 - worker must report unexpected failures to UI
             self.failed.emit(str(exc))
             return
@@ -156,10 +184,14 @@ class MainWindow(QMainWindow):
         self._project: Project | None = None
         self._project_path: Path | None = None
         self._current_result: ScanResult | None = None
+        self._result_before_scan: ScanResult | None = None
         self._rendered_findings: list[Finding] = []
+        self._close_after_scan = False
         self._dirty = False
         self._project_store = ProjectStore()
         self._report_exporter = ExcelReportExporter()
+        self._html_report_exporter = HtmlReportExporter()
+        self._pdf_report_exporter = PdfReportExporter()
         self._build_ui()
         self._update_project_state()
 
@@ -170,9 +202,7 @@ class MainWindow(QMainWindow):
 
         title = QLabel("医学实验图像与数据查重")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        subtitle = QLabel(
-            "当前 Alpha 支持项目与 Excel 报告、通用图片查重及 Western blot 专项候选。"
-        )
+        subtitle = QLabel("当前 Alpha 支持三种本地报告、通用图片查重及 Western/荧光/病理专项候选。")
         subtitle.setStyleSheet("color: #666;")
         self._project_label = QLabel()
         self._project_label.setStyleSheet("color: #1f4e78; font-weight: 600;")
@@ -181,28 +211,34 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._project_label)
 
         project_actions = QHBoxLayout()
-        new_project = QPushButton("新建项目")
-        open_project = QPushButton("打开项目")
+        self._new_project_button = QPushButton("新建项目")
+        self._open_project_button = QPushButton("打开项目")
         self._save_button = QPushButton("保存项目")
-        self._export_button = QPushButton("导出 Excel 报告")
-        project_actions.addWidget(new_project)
-        project_actions.addWidget(open_project)
+        self._export_button = QPushButton("导出报告…")
+        project_actions.addWidget(self._new_project_button)
+        project_actions.addWidget(self._open_project_button)
         project_actions.addWidget(self._save_button)
         project_actions.addWidget(self._export_button)
         project_actions.addStretch(1)
         layout.addLayout(project_actions)
 
         actions = QHBoxLayout()
-        add_files = QPushButton("添加文件")
-        add_folder = QPushButton("添加文件夹")
-        clear = QPushButton("清空输入")
+        self._add_files_button = QPushButton("添加文件")
+        self._add_folder_button = QPushButton("添加文件夹")
+        self._clear_sources_button = QPushButton("清空输入")
         self._scan_button = QPushButton("开始扫描")
         self._scan_button.setStyleSheet("font-weight: 600;")
-        actions.addWidget(add_files)
-        actions.addWidget(add_folder)
-        actions.addWidget(clear)
+        self._pause_button = QPushButton("暂停")
+        self._pause_button.setEnabled(False)
+        self._cancel_button = QPushButton("取消")
+        self._cancel_button.setEnabled(False)
+        actions.addWidget(self._add_files_button)
+        actions.addWidget(self._add_folder_button)
+        actions.addWidget(self._clear_sources_button)
         actions.addStretch(1)
         actions.addWidget(self._scan_button)
+        actions.addWidget(self._pause_button)
+        actions.addWidget(self._cancel_button)
         layout.addLayout(actions)
 
         self._sources = QListWidget()
@@ -248,21 +284,34 @@ class MainWindow(QMainWindow):
         self._evidence_summary = QLabel("选择一条结果后显示图像或数值证据。")
         self._evidence_summary.setWordWrap(True)
         self._evidence_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        evidence_actions = QHBoxLayout()
+        self._crop_evidence_check = QCheckBox("聚焦匹配区域")
+        self._crop_evidence_check.setEnabled(False)
+        self._copy_evidence_button = QPushButton("复制证据摘要")
+        self._copy_evidence_button.setEnabled(False)
+        evidence_actions.addWidget(self._crop_evidence_check)
+        evidence_actions.addWidget(self._copy_evidence_button)
+        evidence_actions.addStretch(1)
         evidence_layout.addWidget(self._evidence_images_container)
         evidence_layout.addWidget(self._evidence_summary)
+        evidence_layout.addLayout(evidence_actions)
         layout.addWidget(evidence_group)
 
-        new_project.clicked.connect(self._new_project_dialog)
-        open_project.clicked.connect(self._open_project_dialog)
+        self._new_project_button.clicked.connect(self._new_project_dialog)
+        self._open_project_button.clicked.connect(self._open_project_dialog)
         self._save_button.clicked.connect(self._save_current_project)
-        self._export_button.clicked.connect(self._export_excel_report_dialog)
-        add_files.clicked.connect(self._select_files)
-        add_folder.clicked.connect(self._select_folder)
-        clear.clicked.connect(self._clear_sources)
+        self._export_button.clicked.connect(self._export_report_dialog)
+        self._add_files_button.clicked.connect(self._select_files)
+        self._add_folder_button.clicked.connect(self._select_folder)
+        self._clear_sources_button.clicked.connect(self._clear_sources)
         self._scan_button.clicked.connect(self._start_scan)
+        self._pause_button.clicked.connect(self._toggle_scan_pause)
+        self._cancel_button.clicked.connect(self._cancel_scan)
         self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
         self._western_single_band_check.toggled.connect(self._western_settings_changed)
         self._results.cellClicked.connect(self._show_selected_evidence)
+        self._crop_evidence_check.toggled.connect(self._toggle_evidence_crop)
+        self._copy_evidence_button.clicked.connect(self._copy_evidence_summary)
         self.setCentralWidget(central)
 
     def _build_menu(self) -> None:
@@ -272,7 +321,7 @@ class MainWindow(QMainWindow):
             ("打开项目", QKeySequence.StandardKey.Open, self._open_project_dialog),
             ("保存项目", QKeySequence.StandardKey.Save, self._save_current_project),
             ("项目另存为", QKeySequence.StandardKey.SaveAs, self._save_project_as),
-            ("导出 Excel 报告", "Ctrl+E", self._export_excel_report_dialog),
+            ("导出报告…", "Ctrl+E", self._export_report_dialog),
         ]
         for text, shortcut, callback in actions:
             action = QAction(text, self)
@@ -356,8 +405,35 @@ class MainWindow(QMainWindow):
         self._update_project_state()
         return output
 
+    def export_html_report(self, path: str | Path) -> Path:
+        if self._project is None or self._current_result is None:
+            raise ValueError("请先完成或打开一次扫描结果")
+        output = self._html_report_exporter.export(self._current_result, path, self._project)
+        self._record_report(output, "HTML")
+        return output
+
+    def export_pdf_report(self, path: str | Path) -> Path:
+        if self._project is None or self._current_result is None:
+            raise ValueError("请先完成或打开一次扫描结果")
+        output = self._pdf_report_exporter.export(self._current_result, path, self._project)
+        self._record_report(output, "PDF")
+        return output
+
+    def _record_report(self, output: Path, report_type: str) -> None:
+        if self._project is None:
+            return
+        self._project = self._project.with_report(output)
+        self._dirty = True
+        if self._project_path is not None:
+            self._save_current_project(silent=True)
+        self._status.setText(f"{report_type} 报告已导出：{output}")
+        self._update_project_state()
+
     @Slot()
     def _new_project_dialog(self) -> None:
+        if self._thread is not None:
+            QMessageBox.information(self, "扫描正在运行", "请先暂停后取消扫描，再切换项目。")
+            return
         if not self._confirm_discard_changes():
             return
         name, accepted = QInputDialog.getText(self, "新建项目", "项目名称：")
@@ -369,6 +445,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _open_project_dialog(self) -> None:
+        if self._thread is not None:
+            QMessageBox.information(self, "扫描正在运行", "请先暂停后取消扫描，再切换项目。")
+            return
         if not self._confirm_discard_changes():
             return
         path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", PROJECT_FILTER)
@@ -443,6 +522,34 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "导出完成", f"报告已保存到：\n{output}")
 
     @Slot()
+    def _export_report_dialog(self) -> None:
+        if self._current_result is None:
+            QMessageBox.information(self, "没有扫描结果", "请先完成扫描或打开已有结果的项目。")
+            return
+        project_name = self._project.name if self._project else "查重"
+        filters = "Excel 工作簿 (*.xlsx);;HTML 单文件 (*.html);;PDF 文档 (*.pdf)"
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出查重报告",
+            f"{project_name}-查重报告.xlsx",
+            filters,
+        )
+        if not path:
+            return
+        try:
+            suffix = Path(path).suffix.lower()
+            if suffix in {".html", ".htm"} or selected_filter.startswith("HTML"):
+                output = self.export_html_report(path)
+            elif suffix == ".pdf" or selected_filter.startswith("PDF"):
+                output = self.export_pdf_report(path)
+            else:
+                output = self.export_excel_report(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "报告导出失败", str(exc))
+            return
+        QMessageBox.information(self, "导出完成", f"报告已保存到：\n{output}")
+
+    @Slot()
     def _select_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self,
@@ -501,7 +608,11 @@ class MainWindow(QMainWindow):
             self._project = self._project.with_sources(sources)
 
         self._render_result(None)
+        self._result_before_scan = self._current_result
         self._scan_button.setEnabled(False)
+        self._pause_button.setEnabled(True)
+        self._pause_button.setText("暂停")
+        self._cancel_button.setEnabled(True)
         self._thread = QThread(self)
         minimum_digit_run = self._project.minimum_digit_run if self._project else 4
         western_single_band_enabled = (
@@ -517,10 +628,35 @@ class MainWindow(QMainWindow):
         self._worker.progress.connect(self._update_progress)
         self._worker.finished.connect(self._show_result)
         self._worker.failed.connect(self._show_failure)
+        self._worker.cancelled.connect(self._show_cancelled)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
+        self._worker.cancelled.connect(self._thread.quit)
         self._thread.finished.connect(self._cleanup_worker)
         self._thread.start()
+        self._update_project_state()
+
+    @Slot()
+    def _toggle_scan_pause(self) -> None:
+        if self._worker is None:
+            return
+        if self._worker.control.paused:
+            self._worker.control.resume()
+            self._pause_button.setText("暂停")
+            self._status.setText("扫描已继续，正在等待下一个进度更新。")
+        else:
+            self._worker.control.pause()
+            self._pause_button.setText("继续")
+            self._status.setText("正在安全暂停；当前文件或验证批次结束后暂停。")
+
+    @Slot()
+    def _cancel_scan(self) -> None:
+        if self._worker is None:
+            return
+        self._worker.control.cancel()
+        self._pause_button.setEnabled(False)
+        self._cancel_button.setEnabled(False)
+        self._status.setText("正在安全取消；本次未完成结果不会覆盖上一次扫描。")
 
     @Slot(int, int, str)
     def _update_progress(self, completed: int, total: int, message: str) -> None:
@@ -544,6 +680,15 @@ class MainWindow(QMainWindow):
         if result.issues:
             preview = "\n".join(issue.message for issue in result.issues[:8])
             QMessageBox.warning(self, "扫描提示", preview)
+
+    @Slot()
+    def _show_cancelled(self) -> None:
+        self._current_result = self._result_before_scan
+        self._render_result(self._current_result)
+        if self._current_result is None:
+            self._status.setText("扫描已取消，本次未完成结果已丢弃。")
+        else:
+            self._status.setText("扫描已取消，已恢复扫描前的完整结果。")
 
     def _render_result(self, result: ScanResult | None) -> None:
         self._results.setRowCount(0)
@@ -575,6 +720,8 @@ class MainWindow(QMainWindow):
         if finding.rule_id.startswith("excel."):
             self._evidence_images_container.hide()
             self._evidence_summary.setText(_excel_evidence_summary_text(finding))
+            self._crop_evidence_check.setEnabled(False)
+            self._copy_evidence_button.setEnabled(True)
             return
         if len(finding.locations) < 2 or not all(
             Path(location.source_path).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
@@ -597,16 +744,32 @@ class MainWindow(QMainWindow):
             _evidence_page(finding.locations[1]),
         )
         self._evidence_summary.setText(_evidence_summary_text(finding))
+        self._crop_evidence_check.setEnabled(first_region is not None or second_region is not None)
+        self._copy_evidence_button.setEnabled(True)
 
     def _clear_evidence(self, message: str | None = None) -> None:
         self._evidence_images_container.show()
         self._first_evidence.set_evidence(None)
         self._second_evidence.set_evidence(None)
         self._evidence_summary.setText(message or "选择一条结果后显示图像或数值证据。")
+        self._crop_evidence_check.setEnabled(False)
+        self._copy_evidence_button.setEnabled(False)
+
+    @Slot(bool)
+    def _toggle_evidence_crop(self, enabled: bool) -> None:
+        self._first_evidence.set_crop_to_region(enabled)
+        self._second_evidence.set_crop_to_region(enabled)
+
+    @Slot()
+    def _copy_evidence_summary(self) -> None:
+        QApplication.clipboard().setText(self._evidence_summary.text())
+        self._status.setText("证据摘要已复制到剪贴板。")
 
     @Slot(str)
     def _show_failure(self, message: str) -> None:
-        self._status.setText("扫描失败")
+        self._current_result = self._result_before_scan
+        self._render_result(self._current_result)
+        self._status.setText("扫描失败，已恢复扫描前的完整结果。")
         QMessageBox.critical(self, "扫描失败", message)
 
     @Slot(int)
@@ -638,7 +801,15 @@ class MainWindow(QMainWindow):
             self._thread.deleteLater()
         self._worker = None
         self._thread = None
+        self._result_before_scan = None
         self._scan_button.setEnabled(True)
+        self._pause_button.setText("暂停")
+        self._pause_button.setEnabled(False)
+        self._cancel_button.setEnabled(False)
+        self._update_project_state()
+        if self._close_after_scan:
+            self._close_after_scan = False
+            QTimer.singleShot(0, self.close)
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -650,10 +821,17 @@ class MainWindow(QMainWindow):
         path_text = str(self._project_path) if self._project_path else "尚未保存"
         self._project_label.setText(f"当前项目：{name}{marker}  ·  {path_text}")
         self.setWindowTitle(f"医学实验图像与数据查重 · {name}{marker}")
-        self._save_button.setEnabled(self._project is not None)
-        self._export_button.setEnabled(self._current_result is not None)
-        self._digit_run_spin.setEnabled(self._project is not None)
-        self._western_single_band_check.setEnabled(self._project is not None)
+        scan_running = self._thread is not None
+        self._save_button.setEnabled(self._project is not None and not scan_running)
+        self._new_project_button.setEnabled(not scan_running)
+        self._open_project_button.setEnabled(not scan_running)
+        self._add_files_button.setEnabled(not scan_running)
+        self._add_folder_button.setEnabled(not scan_running)
+        self._clear_sources_button.setEnabled(not scan_running)
+        self._scan_button.setEnabled(not scan_running)
+        self._export_button.setEnabled(self._current_result is not None and not scan_running)
+        self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
+        self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
 
     def _confirm_discard_changes(self) -> bool:
         if not self._dirty:
@@ -674,6 +852,21 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._thread is not None and self._thread.isRunning():
+            answer = QMessageBox.question(
+                self,
+                "扫描仍在运行",
+                "关闭窗口将安全取消本次扫描，扫描前的完整结果会保留。是否继续关闭？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            self._close_after_scan = True
+            self._cancel_scan()
+            event.ignore()
+            return
         if self._confirm_discard_changes():
             event.accept()
         else:

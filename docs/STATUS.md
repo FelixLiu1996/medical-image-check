@@ -46,20 +46,29 @@
 - 将病理同区域不同倍率分类为正常关系，同倍率高一致组织区域分类为疑似复用；每个图片页对只保留最佳证据。
 - GUI 增加荧光/病理中文证据摘要及组织区域裁剪预览；Excel“图像证据”扩展为三类专项统一结构。
 - 三类专项继续共享单次图片解码，并增加候选桶、每页特征和页对结果上限等工程保护。
+- 实现线程安全的扫描暂停、继续和安全取消；在文件、算法阶段和候选批次设置协作式检查点，取消不保存部分结果并恢复扫描前完整结果。
+- GUI 增加暂停/继续/取消按钮，关闭正在扫描的窗口会先确认并安全取消。
+- 通过 ADR-0004 确定单文件 HTML 与 ReportLab PDF 报告方案。
+- 增加单文件 HTML 报告，内嵌 CSS、JavaScript 与 PNG 图像证据，支持文本搜索和风险筛选且不加载网络资源。
+- 增加中文 A4 PDF 报告，包含总览、完整结果表、图像证据、扫描提示和页码；优先嵌入 Windows/macOS/Linux 系统中文字体。
+- GUI 统一为三格式报告导出，并增加聚焦匹配区域和复制证据摘要。
+- 登记 ReportLab、Pillow、charset-normalizer 许可证，并将实际 wheel 许可证收集加入 Windows portable 工作流。
+- 将打包程序 `--smoke-test` 扩展为实际生成并校验 Excel、HTML、PDF 三种临时报告，防止报告依赖漏打包。
 
 ## 当前阶段结论
 
 - Western blot 上一阶段已通过 Windows/Linux CI 和 Windows portable 构建及下载校验。
 - 荧光/病理专项与 GUI/报告已推送，并通过本阶段 Windows/Linux CI、Windows standalone 编译、程序启动冒烟、ZIP 组装和工件上传。
-- 本地扫描算法升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`，软件版本升级为 `0.1.0a6`。
+- 当前本地已完成扫描控制、三格式报告和证据交互，待推送后执行本阶段远程 CI 与 portable 验证。
+- 扫描算法仍为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`，软件版本升级为 `0.1.0a7`。
 
 ## 下一步
 
-1. 获取 Western/荧光/病理正负例验收数据，校准阈值、实验组与连续切片边界。
-2. 继续完善专项证据交互、报告和扫描任务工程能力。
+1. 推送 `0.1.0a7` 并验证 Windows/Linux CI、Windows portable 和三种报告依赖打包。
+2. 获取 Western/荧光/病理正负例验收数据，校准阈值、实验组与连续切片边界。
 3. 后续补充 Excel 自定义容差、单次运算、顺序打乱、区域和统计规则。
-4. 在干净 Windows 10/11 实机完成人工 GUI 与样例扫描验收。
-5. 创建并评审基础开发 PR。
+4. 设计持久化任务断点、崩溃恢复和历史库，不把进程内暂停误称为断点续扫。
+5. 在干净 Windows 10/11 实机验收 GUI、暂停/取消、三种报告和 PDF 字体/打印。
 
 ## 阻塞或待定
 
@@ -71,6 +80,9 @@
 - 当前荧光基线依赖可分离颜色通道或文件名角色；未读取显微镜元数据、未建立实验组语义，不同通道结构差异大时可能漏检。
 - 当前病理基线只支持普通静态图片；未支持全切片格式和连续切片语义，强染色差异、非规则尺度或任意旋转仍可能漏检。
 - 当前 Excel 片段/近似/序列阈值也仅通过合成数据验证；默认 4 位可能产生大量低风险候选。
+- 暂停/取消是进程内协作式控制；单个大文件解码或验证批次结束前可能延迟响应，关闭软件后不能恢复未完成任务。
+- HTML 最多内嵌前 120 条图像证据，PDF 最多内嵌前 40 条；全部结果仍保留在结果表和 Excel 报告。
+- PDF 已在 macOS 嵌入中文字体并完成渲染/文本层验证；Windows 系统字体发现、不同阅读器和打印仍待 portable/实机验收。
 - Windows 免安装包已通过 Actions 构建与冒烟，仍需干净 Windows 10/11 实机人工验收。
 
 ## 明确未开始
@@ -85,7 +97,7 @@
 - Python 3.12.13
 - Ruff 检查与格式检查通过
 - `pip check` 通过
-- pytest 70 项通过
+- pytest 74 项通过
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过
@@ -100,3 +112,5 @@
 - 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；共 133 个条目，主程序、Qt/OpenCV 运行库和许可证材料齐全
 - 荧光/病理阶段 GitHub CI Windows/Linux 通过（run `32840344162`）
 - Windows portable `0.1.0a6` standalone 构建、程序冒烟、ZIP 组装和上传通过（run `32840344121`）；Actions 工件 `MedicalImageCheck-windows-x64-portable` 为 85,370,794 字节
+- 扫描控制、HTML/PDF 报告和 GUI 证据交互本地 74 项测试通过；PDF 两页中文样例通过 Poppler 全页渲染目视检查和 pypdf 文本层验证
+- ReportLab、Pillow、charset-normalizer 的实际 wheel 许可证收集通过

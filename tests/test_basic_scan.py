@@ -1,10 +1,16 @@
 from pathlib import Path
+from threading import Event, Thread
 
 import cv2
 import numpy as np
+import pytest
 from openpyxl import Workbook
 
-from medical_image_check.services.basic_scan import BasicScanService
+from medical_image_check.services.basic_scan import (
+    BasicScanService,
+    ScanCancelled,
+    ScanControl,
+)
 
 
 def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) -> None:
@@ -69,3 +75,37 @@ def test_basic_scan_uses_configured_digit_fragment_length(tmp_path: Path) -> Non
 
     assert any(item.rule_id == "excel.digit_fragment" for item in default_result.findings)
     assert not any(item.rule_id == "excel.digit_fragment" for item in stricter_result.findings)
+
+
+def test_scan_control_pauses_resumes_and_cancels_at_checkpoints() -> None:
+    control = ScanControl()
+    checkpoint_completed = Event()
+    control.pause()
+
+    thread = Thread(target=lambda: (control.checkpoint(), checkpoint_completed.set()))
+    thread.start()
+    assert not checkpoint_completed.wait(timeout=0.05)
+
+    control.resume()
+    assert checkpoint_completed.wait(timeout=1.0)
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+
+    control.cancel()
+    with pytest.raises(ScanCancelled):
+        control.checkpoint()
+
+
+def test_basic_scan_cancel_discards_incomplete_result_at_next_file(tmp_path: Path) -> None:
+    image = np.arange(32 * 32, dtype=np.uint8).reshape(32, 32)
+    for index in range(3):
+        assert cv2.imwrite(str(tmp_path / f"{index}.png"), image + index)
+    control = ScanControl()
+
+    def cancel_after_first(completed: int, total: int, message: str) -> None:
+        del total, message
+        if completed == 1:
+            control.cancel()
+
+    with pytest.raises(ScanCancelled):
+        BasicScanService().scan([tmp_path], cancel_after_first, control)

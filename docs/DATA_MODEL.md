@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-- `Project` 使用 `schema_version = 4`，包含 UUID、名称、时间、源路径、连续数字片段最短位数、Western blot 单条带开关、最近一次扫描结果和报告路径。
+- `Project` 使用 `schema_version = 4`，包含 UUID、名称、时间、源路径、连续数字片段最短位数、Western blot 单条带开关、最近一次扫描结果和 Excel/HTML/PDF 报告路径。
 - `ProjectStore` 使用 UTF-8 JSON 和临时文件替换方式原子保存，不修改源数据。
 - `Finding`、`EvidenceLocation`、`ScanIssue` 和 `ScanResult` 作为 UI 与引擎之间的稳定对象。
 - Finding ID 根据规则与位置生成确定性指纹。
@@ -17,6 +17,8 @@
 - `Finding.details` 支持递归 JSON 证据，Excel 片段/近似结果保存逐单元格完整值，列关系保存逐位置配对值与运算结果。
 
 输入路径、连续数字片段最短位数或 Western blot 单条带开关变化会使最近扫描结果失效，防止导出与当前输入/参数不一致的旧结果。当前 `.mic-project.json` 仍是开发阶段清单格式，不等同于 PRD 中最终的可移植项目包，也尚未缓存图片特征。
+
+扫描暂停/取消状态当前只存在于进程内，不写入项目清单。取消后的本次部分特征和部分结果全部丢弃，上一次完整 `ScanResult` 保持不变；崩溃恢复和跨进程任务断点尚未实现。
 
 ## 核心实体
 
