@@ -80,8 +80,6 @@
 - Python wheel 构建与源码编译检查通过
 - 2000 项×96 描述子的局部候选层合成微基准约 2.9 秒、进程峰值 RSS 约 304 MiB（不代表端到端扫描）
 - 20,000 个 11 位合成数值：片段规则约 1.6 秒/53,000 条候选，高级关系约 0.8 秒/8,000 条候选，峰值约 225 MiB（不代表真实分布）
-- GitHub CI Windows/Linux 通过（run `32828452096`）
-- Windows portable `0.1.0a3` 构建、打包冒烟和工件上传通过（run `32828452138`）
-- 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；主程序、Qt/OpenCV 运行库和许可证材料齐全
-
-本轮 `0.1.0a4` Excel 高级规则和项目清单版本 3 已完成本地验证，尚待新的 GitHub CI 与 Windows portable 工作流验证。
+- GitHub CI Windows/Linux 通过（run `32831778922`）
+- Windows portable `0.1.0a4` 构建、打包冒烟和工件上传通过（run `32831778856`）
+- 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；共 133 个条目，主程序、Qt/OpenCV 运行库和许可证材料齐全
