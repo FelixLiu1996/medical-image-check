@@ -5,6 +5,18 @@ on:
   push:
     branches: ["codex/**"]
     tags: ["v*"]
+    paths:
+      - ".github/workflows/windows-portable.yml"
+      - "pysidedeploy.spec"
+      - "pyproject.toml"
+      - "requirements/**"
+      - "main.py"
+      - "src/**"
+      - "scripts/collect_licenses.py"
+      - "legal/**"
+      - "LICENSE"
+      - "NOTICE"
+      - "THIRD_PARTY_NOTICES.md"
 
 permissions:
   contents: read
@@ -37,7 +49,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path "$app/*" -DestinationPath "dist/MedicalImageCheck-windows-x64-portable.zip" -Force
           $hash = (Get-FileHash "dist/MedicalImageCheck-windows-x64-portable.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  MedicalImageCheck-windows-x64-portable.zip" | Set-Content "dist/MedicalImageCheck-windows-x64-portable.zip.sha256"
+          $checksum = "$hash  MedicalImageCheck-windows-x64-portable.zip`n"
+          $encoding = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::WriteAllText("dist/MedicalImageCheck-windows-x64-portable.zip.sha256", $checksum, $encoding)
       - uses: actions/upload-artifact@v7
         with:
           name: MedicalImageCheck-windows-x64-portable
