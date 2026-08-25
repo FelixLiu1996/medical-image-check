@@ -2,7 +2,7 @@
 
 面向基础医学实验研究团队的 Windows 本地图像与 Excel 原始数据查重工具。
 
-> 当前状态：需求初稿待评审，尚未进入功能开发。
+> 当前状态：需求 0.1 已确认，正在开发首个基础版本。
 
 GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 
@@ -36,7 +36,41 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 
 ## 开发状态
 
-当前仓库只包含需求与治理文档。技术栈、工程结构和构建命令将在需求确认后通过 ADR 确定。
+当前开发分支已经具备：
+
+- Python 3.12/PySide6 Essentials 中文桌面骨架；
+- 图片文件 SHA-256 完全重复检测；
+- xlsx、xlsm、xls、csv 数值读取；
+- Excel 完整数值和数值行重复检测；
+- 隐藏工作表扫描、公式缓存缺失提示和损坏文件隔离；
+- 版本化项目清单的保存与读取；
+- Windows/Linux GitHub CI、静态检查和自动化测试。
+
+局部图像重叠、数字片段、近似值、专项医学图像算法、历史库和完整报告仍在后续里程碑。
+
+## 本地开发
+
+需要 Python 3.12：
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -c requirements/constraints.txt -e ".[dev]"
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest
+.venv/bin/python -m medical_image_check
+```
+
+Windows PowerShell：
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -c requirements/constraints.txt -e ".[dev]"
+.venv\Scripts\python.exe -m ruff check .
+.venv\Scripts\python.exe -m pytest
+.venv\Scripts\python.exe -m medical_image_check
+```
+
+当前界面明确标记为基础开发版，不应作为正式科研结论工具使用。
 
 ## 许可证
 

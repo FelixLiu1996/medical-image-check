@@ -2,6 +2,17 @@
 
 状态：框架已确定，验收数据和准确率目标待定。
 
+## 开发验证命令
+
+```bash
+python -m ruff check .
+python -m ruff format --check .
+python -m pip check
+QT_QPA_PLATFORM=offscreen python -m pytest
+```
+
+当前自动化测试使用临时目录生成完全人工数据，覆盖图片文件指纹、xlsx/xlsm/xls/csv 数值读取、隐藏工作表、公式无缓存、损坏文件隔离、原文件不变、项目清单和 Qt 窗口冒烟。测试数据不包含真实实验数据。
+
 ## 测试层次
 
 1. 单元测试：规范化、哈希、数值容差、规则评分、版本迁移。

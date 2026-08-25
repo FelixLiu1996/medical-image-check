@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-项目目前处于需求评审阶段，尚未进入功能开发。未经用户明确确认 `docs/PRD.md` 并授权开始开发，不得擅自实现产品功能或锁定技术栈。
+项目已进入初版开发阶段。`docs/PRD.md` 0.1 是已确认的产品基线；新增或改变范围时必须先同步需求和变更记录。
 
 ## 新窗口必读顺序
 
@@ -75,4 +75,14 @@
 
 ## 构建和测试命令
 
-技术栈尚未确定，因此当前没有构建命令。技术栈确定后，必须在此处和 `README.md` 同步加入可复制执行的安装、运行、测试和打包命令。
+使用 Python 3.12。推荐在仓库根目录执行：
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -c requirements/constraints.txt -e ".[dev]"
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest
+.venv/bin/python -m medical_image_check
+```
+
+Windows PowerShell 将解释器路径替换为 `.venv\\Scripts\\python.exe`。Windows 打包命令将在打包原型验证后补充。

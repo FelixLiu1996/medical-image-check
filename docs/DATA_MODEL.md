@@ -1,6 +1,15 @@
 # 数据模型初稿
 
-状态：需求级模型，存储技术尚未确定。
+状态：核心对象已建立，历史库和项目包仍待实现。
+
+## 当前实现
+
+- `Project` 使用 `schema_version = 1`，包含 UUID、名称、时间和源路径。
+- `ProjectStore` 使用 UTF-8 JSON 和临时文件替换方式原子保存，不修改源数据。
+- `Finding`、`EvidenceLocation`、`ScanIssue` 和 `ScanResult` 作为 UI 与引擎之间的稳定对象。
+- Finding ID 根据规则与位置生成确定性指纹。
+
+当前 `.mic-project.json` 是开发阶段清单格式，不等同于 PRD 中最终的可移植项目包。
 
 ## 核心实体
 

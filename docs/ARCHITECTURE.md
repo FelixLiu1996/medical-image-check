@@ -1,6 +1,16 @@
 # 架构初稿
 
-状态：需求阶段，技术栈未确定。
+状态：基础架构已实现，持续演进。
+
+## 已选技术栈
+
+- Python 3.12
+- PySide6 Essentials / Qt Widgets
+- openpyxl、xlrd 和标准库 csv
+- pytest、Ruff
+- Windows/Linux GitHub Actions
+
+详细取舍见 `decisions/ADR-0002-python-pyside-modular-monolith.md`。
 
 ## 架构目标
 
@@ -36,12 +46,24 @@
 - 报告消费稳定结果模型，不直接读取算法内部临时数据。
 - 项目包与内部数据库格式分离，项目包需要显式版本和迁移。
 
+## 当前代码映射
+
+| 逻辑层 | 路径 |
+| --- | --- |
+| 领域模型 | `src/medical_image_check/domain/` |
+| 查重引擎 | `src/medical_image_check/engines/` |
+| 格式与持久化 | `src/medical_image_check/infrastructure/` |
+| 应用服务 | `src/medical_image_check/services/` |
+| Qt UI | `src/medical_image_check/ui/` |
+| 自动化测试 | `tests/` |
+
+当前 `BasicScanService` 已贯通输入收集、图片文件指纹、Excel 数值解析、精确重复结果和 UI 展示。项目清单已经具备 JSON 原子保存，但尚未接入 UI。
+
 ## 尚未决定
 
-- 桌面框架和主要编程语言。
 - 持久化数据库及迁移框架。
 - 图像索引和近邻检索实现。
 - ONNX Runtime 或其他推理运行时的最终选择。
 - 安装器与免安装包实现。
 
-这些选择应在 PRD 确认后通过 ADR 决定。
+这些选择应通过独立 ADR 决定。

@@ -27,6 +27,8 @@
 6. 执行干净 Windows 环境冒烟测试。
 7. 发布 GitHub Release。
 
+当前开发分支已实现 Windows/Linux 的 Ruff 和 pytest CI。Windows 安装包、免安装包和许可证材料打包尚未实现。
+
 ## 发布限制
 
 - 不包含真实实验数据。
