@@ -43,18 +43,17 @@
 
 ## 当前阶段结论
 
-- Excel 高级规则阶段已推送到 `codex/v0.1-foundation`，并通过 Windows/Linux CI 和 Windows portable 构建及下载校验。
-- Western blot 基线已完成本地实现和合成验证，尚待本轮推送后的远程 CI 与 Windows portable 验证。
+- Western blot 基线已推送到 `codex/v0.1-foundation`，并通过 Windows/Linux CI 和 Windows portable 构建及下载校验。
+- 已下载 `0.1.0a5` 工件并直接验证 SHA-256；ZIP 包含主程序、Western blot 编译内容、Qt/OpenCV 运行库及第三方许可证材料。
 - 本地扫描算法升级为 `generic-image-local-1+western-blot-1+excel-advanced-1`，软件版本升级为 `0.1.0a5`。
 
 ## 下一步
 
-1. 推送并验证 Western blot 基线的 GitHub CI 与 Windows portable 工件。
-2. 获取 Western blot 正负例验收数据，调优面板拆分、弱条带和局部编辑边界。
-3. 继续荧光同视野/通道关系和普通病理局部多尺度基线。
-4. 后续补充 Excel 自定义容差、单次运算、顺序打乱、区域和统计规则。
-5. 在干净 Windows 10/11 实机完成人工 GUI 与样例扫描验收。
-6. 创建并评审基础开发 PR。
+1. 获取 Western blot 正负例验收数据，调优面板拆分、弱条带和局部编辑边界。
+2. 继续荧光同视野/通道关系和普通病理局部多尺度基线。
+3. 后续补充 Excel 自定义容差、单次运算、顺序打乱、区域和统计规则。
+4. 在干净 Windows 10/11 实机完成人工 GUI 与样例扫描验收。
+5. 创建并评审基础开发 PR。
 
 ## 阻塞或待定
 
@@ -86,8 +85,6 @@
 - 2000 项×96 描述子的局部候选层合成微基准约 2.9 秒、进程峰值 RSS 约 304 MiB（不代表端到端扫描）
 - 20,000 个 11 位合成数值：片段规则约 1.6 秒/53,000 条候选，高级关系约 0.8 秒/8,000 条候选，峰值约 225 MiB（不代表真实分布）
 - 500 张 180×360 随机合成 blot：约 2.3 秒提取 542 个区域，约 0.5 秒验证 31,900 对索引候选，峰值约 101 MiB，产生 1 条低风险结果（不代表真实分布）
-- GitHub CI Windows/Linux 通过（run `32831778922`）
-- Windows portable `0.1.0a4` 构建、打包冒烟和工件上传通过（run `32831778856`）
+- GitHub CI Windows/Linux 通过（run `32834918247`）
+- Windows portable `0.1.0a5` 构建、打包冒烟和工件上传通过（run `32834918889`）
 - 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；共 133 个条目，主程序、Qt/OpenCV 运行库和许可证材料齐全
-
-本轮 `0.1.0a5` Western blot 基线和项目清单版本 4 已完成本地验证，尚待新的 GitHub CI 与 Windows portable 工作流验证。

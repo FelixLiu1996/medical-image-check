@@ -46,12 +46,11 @@
 
 ## 下一步
 
-1. 完成 Western blot 基线的远程 CI、Windows portable 与下载工件校验。
-2. 使用授权 Western blot 正负例调优阈值和复杂面板/弱条带边界。
-3. 继续荧光同视野/通道关系和普通病理局部多尺度基线。
-4. 后续补齐未完成 Excel 规则与参数界面。
-5. 在干净 Windows 10/11 实机人工验证 GUI、项目保存、扫描和报告导出。
-6. 通过 PR 合并阶段性 Alpha 基线。
+1. 使用授权 Western blot 正负例调优阈值和复杂面板/弱条带边界。
+2. 继续荧光同视野/通道关系和普通病理局部多尺度基线。
+3. 后续补齐未完成 Excel 规则与参数界面。
+4. 在干净 Windows 10/11 实机人工验证 GUI、项目保存、扫描和报告导出。
+5. 通过 PR 合并阶段性 Alpha 基线。
 
 ## 验证状态
 
@@ -66,11 +65,9 @@
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - Python wheel 构建与源码编译检查：通过。
-- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32831778922`）。
-- Windows portable：`0.1.0a4` 在 Windows runner 构建、打包冒烟和工件上传通过（run `32831778856`）。
+- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32834918247`）。
+- Windows portable：`0.1.0a5` 在 Windows runner 构建、打包冒烟和工件上传通过（run `32834918889`）。
 - portable 工件：下载后使用原始 `.sha256` 文件校验通过，共 133 个条目，主程序、Qt/OpenCV 运行库和许可证材料齐全。
 - 局部算法：旋转/缩放/压缩裁剪、双裁剪部分重叠及无关图片负例合成测试通过；证据 UI 冒烟通过。
 - Western blot：曝光变化/水平翻转、同图面板 Copy-Move、单条带开关、无关面板负例、项目迁移、GUI 和报告合成测试通过。
 - Western 合成微基准：500 张随机条带图提取 542 个候选约 2.3 秒，验证约 31,900 对索引候选约 0.5 秒，峰值约 101 MiB，产生 1 条低风险候选。
-
-本轮 Western blot 基线、schema 4 和 `0.1.0a5` 已完成本地验证，尚待新的 GitHub CI 与 Windows portable 工作流验证。
