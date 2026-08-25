@@ -61,9 +61,7 @@
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - Python wheel 构建与源码编译检查：通过。
-- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32825585656`）。
-- Windows portable：Windows runner 构建、打包冒烟和工件上传通过（run `32825585609`）。
+- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32828452096`）。
+- Windows portable：`0.1.0a3` 在 Windows runner 构建、打包冒烟和工件上传通过（run `32828452138`）。
 - portable 工件：下载后使用原始 `.sha256` 文件校验通过，主程序、Qt/OpenCV 运行库和许可证材料齐全。
 - 局部算法：旋转/缩放/压缩裁剪、双裁剪部分重叠及无关图片负例合成测试通过；证据 UI 冒烟通过。
-
-本轮 `0.1.0a3` 改动尚待新的 GitHub CI 与 Windows portable 工作流验证。

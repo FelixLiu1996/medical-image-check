@@ -73,8 +73,6 @@
 - 第三方许可证收集脚本本地通过
 - Python wheel 构建与源码编译检查通过
 - 2000 项×96 描述子的局部候选层合成微基准约 2.9 秒、进程峰值 RSS 约 304 MiB（不代表端到端扫描）
-- GitHub CI Windows/Linux 通过（run `32825585656`）
-- Windows portable 构建、打包冒烟和工件上传通过（run `32825585609`）
+- GitHub CI Windows/Linux 通过（run `32828452096`）
+- Windows portable `0.1.0a3` 构建、打包冒烟和工件上传通过（run `32828452138`）
 - 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；主程序、Qt/OpenCV 运行库和许可证材料齐全
-
-本轮局部算法与证据 UI 已完成本地验证，尚待新的 GitHub CI 和 Windows portable run 验证。
