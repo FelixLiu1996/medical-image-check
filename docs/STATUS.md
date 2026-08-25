@@ -27,18 +27,20 @@
 - 通过 ADR-0003 确定 Windows Alpha 免安装包使用 `pyside6-deploy`/Nuitka standalone。
 - 建立 Windows 免安装 ZIP、打包冒烟、SHA-256 和第三方许可证收集工作流。
 
-## 进行中
+## 当前阶段结论
 
-- 推送本轮开发变更并验证 Windows/Linux CI。
-- 通过开发分支 push 触发 Windows portable 工作流，验证真实 Windows 构建产物；工作流进入默认分支后也可手动触发。
+- 本轮代码已推送到 `codex/v0.1-foundation`。
+- Windows/Linux CI 已通过。
+- Windows portable 工作流已在 GitHub Windows runner 上完成真实构建和打包冒烟。
+- 已下载工件并直接验证 SHA-256；ZIP 包含主程序、Qt/OpenCV 运行库及第三方许可证材料。
 
 ## 下一步
 
-1. 完成并下载验证 Windows 免安装 Alpha 工件。
-2. 实现局部关键点、裁剪/重叠候选与几何验证证据。
-3. 增加图像并排预览、匹配区域和证据详情 UI。
-4. 继续 Excel 数字片段、近似值和数值变换规则。
-5. 确认验收数据来源并据此校准阈值。
+1. 实现局部关键点、裁剪/重叠候选与几何验证证据。
+2. 增加图像并排预览、匹配区域和证据详情 UI。
+3. 继续 Excel 数字片段、近似值和数值变换规则。
+4. 确认验收数据来源并据此校准阈值。
+5. 在干净 Windows 10/11 实机完成人工 GUI 与样例扫描验收。
 6. 创建并评审基础开发 PR。
 
 ## 阻塞或待定
@@ -47,7 +49,7 @@
 - 算法准确率与阈值待样例校准。
 - GPU 后端和历史库仍需后续 ADR/验证。
 - 当前全局感知阈值仅通过合成数据验证，不能作为准确率承诺。
-- Windows 免安装包需要 Actions 构建和干净 Windows 10/11 实机验证。
+- Windows 免安装包已通过 Actions 构建与冒烟，仍需干净 Windows 10/11 实机人工验收。
 
 ## 明确未开始
 
@@ -66,6 +68,6 @@
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过
 - Python wheel 构建与源码编译检查通过
-- GitHub CI Windows/Linux 通过（run `32821382142`）
-
-本轮新增代码尚待新的 GitHub CI 与 Windows portable run 验证；上面的 GitHub run 只代表上一基线。
+- GitHub CI Windows/Linux 通过（run `32825585656`）
+- Windows portable 构建、打包冒烟和工件上传通过（run `32825585609`）
+- 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；主程序、Qt/OpenCV 运行库和许可证材料齐全

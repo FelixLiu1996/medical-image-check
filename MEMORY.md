@@ -15,7 +15,7 @@
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
 - 已实现项目 UI 生命周期、扫描结果持久化、基础 Excel 报告、图片文件/解码像素重复、整体感知近似、Excel 精确数值/行重复和 CI。
 - 项目清单已升级为 schema 2，并兼容读取 schema 1。
-- 已建立 Windows portable 工作流和 ADR-0003，等待目标平台构建验证。
+- 已建立 Windows portable 工作流和 ADR-0003，并通过 GitHub Windows runner 构建、冒烟及下载校验。
 
 ## 已确认的重要方向
 
@@ -37,16 +37,15 @@
 - 图像和 Excel 验收样例数据待用户向团队确认后提供。
 - 算法准确率和最终阈值需依据验收数据校准。
 - 历史库持久化和 GPU 后端仍需单独 ADR。
-- Windows portable 工作流和干净 Windows 10/11 运行尚未验证。
+- Windows portable 已通过 GitHub Windows runner 构建与打包冒烟；干净 Windows 10/11 实机人工操作仍待验证。
 - 局部图像裁剪/重叠、Copy-Move 和医学专项算法尚未实现。
 
 ## 下一步
 
-1. 推送本轮变更并确认 Windows/Linux GitHub CI。
-2. 通过开发分支 push 触发、下载并验证 Windows portable 工件；合并后可改用手动触发。
-3. 实现局部关键点、裁剪/重叠召回和几何验证。
-4. 增加图像证据预览，并继续 Excel 高级数值规则。
-5. 通过 PR 合并阶段性 Alpha 基线。
+1. 实现局部关键点、裁剪/重叠召回和几何验证。
+2. 增加图像证据预览，并继续 Excel 高级数值规则。
+3. 在干净 Windows 10/11 实机人工验证 GUI、项目保存、扫描和报告导出。
+4. 通过 PR 合并阶段性 Alpha 基线。
 
 ## 验证状态
 
@@ -61,6 +60,6 @@
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - Python wheel 构建与源码编译检查：通过。
-- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32821382142`）。
-
-本轮 24 项测试和打包改动尚未由新的远程 run 验证，旧 run 仅表示上一提交基线。
+- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32825585656`）。
+- Windows portable：Windows runner 构建、打包冒烟和工件上传通过（run `32825585609`）。
+- portable 工件：下载后使用原始 `.sha256` 文件校验通过，主程序、Qt/OpenCV 运行库和许可证材料齐全。
