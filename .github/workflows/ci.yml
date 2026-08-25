@@ -14,12 +14,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            pytest_args: ""
+          - os: ubuntu-latest
+            # Product UI targets Windows. Linux still validates all headless core logic.
+            pytest_args: "--ignore=tests/test_ui_smoke.py"
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -30,4 +35,4 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest
+        run: python -m pytest ${{ matrix.pytest_args }}

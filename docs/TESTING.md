@@ -13,6 +13,8 @@ QT_QPA_PLATFORM=offscreen python -m pytest
 
 当前自动化测试使用临时目录生成完全人工数据，覆盖图片文件指纹、xlsx/xlsm/xls/csv 数值读取、隐藏工作表、公式无缓存、损坏文件隔离、原文件不变、项目清单和 Qt 窗口冒烟。测试数据不包含真实实验数据。
 
+GitHub CI 在 Windows 执行全部测试；Linux 用于验证无界面核心逻辑，不执行 Windows 产品界面的 Qt 冒烟测试。
+
 ## 测试层次
 
 1. 单元测试：规范化、哈希、数值容差、规则评分、版本迁移。
