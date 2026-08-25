@@ -46,12 +46,14 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - 双图并排证据预览、两侧匹配矩形及匹配点/内点/覆盖率/几何变换说明；
 - xlsx、xlsm、xls、csv 数值读取；
 - Excel 完整数值和数值行重复检测；
+- Excel 连续数字片段、近似值及连续列固定倍数、偏移、目标和/积检测；
+- 项目内可调 3–12 位数字片段阈值，以及 GUI/报告结构化数值证据；
 - 隐藏工作表扫描、公式缓存缺失提示和损坏文件隔离；
 - 基础 Excel 报告，包含概览、结果、提示和项目输入；
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
-当前整体感知和局部几何结果只作为中/低风险候选。单图 Copy-Move、数字片段、近似值、专项医学图像算法、历史库和 HTML/PDF 完整报告仍在后续里程碑。
+当前整体感知、局部几何、Excel 近似和关系结果均需人工复核。单图 Copy-Move、Excel 自定义容差/单次运算/顺序打乱/统计异常、专项医学图像算法、历史库和 HTML/PDF 完整报告仍在后续里程碑。
 
 ## 本地开发
 

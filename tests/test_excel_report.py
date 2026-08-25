@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -29,7 +30,11 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
         title="数值完全相同",
         description="完整数值 2.5 重复。",
         locations=locations,
-        details={"value": "2.5", "count": 2},
+        details={
+            "value": "2.5",
+            "count": 2,
+            "cells": [{"coordinate": "B2", "canonical_value": "2.5"}],
+        },
     )
     result = ScanResult(
         source_count=1,
@@ -44,12 +49,17 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
 
     assert output.name == "report.xlsx"
     workbook = load_workbook(output, read_only=True)
-    assert workbook.sheetnames == ["扫描概览", "查重结果", "扫描提示", "项目输入"]
+    assert workbook.sheetnames == ["扫描概览", "查重结果", "数值证据", "扫描提示", "项目输入"]
     findings = workbook["查重结果"]
     assert findings["A2"].value == "finding-1"
     assert findings["B2"].value == "低"
     assert "实验A" in findings["H2"].value
     assert "实验B" in findings["I2"].value
+    evidence = json.loads(findings["K2"].value)
+    assert "详见“数值证据”" in evidence["cells"]
+    numeric_evidence = workbook["数值证据"]
+    assert numeric_evidence["F2"].value == "B2"
+    assert numeric_evidence["G2"].value == "2.5"
     assert workbook["扫描提示"]["C2"].value == "公式无缓存"
     assert workbook["项目输入"]["B2"].value == str(source.resolve())
     workbook.close()

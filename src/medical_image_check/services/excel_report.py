@@ -51,6 +51,7 @@ class ExcelReportExporter:
         overview.title = "扫描概览"
         self._write_overview(overview, result, project)
         self._write_findings(workbook, result)
+        self._write_numeric_evidence(workbook, result)
         self._write_issues(workbook, result)
         self._write_sources(workbook, project)
 
@@ -117,13 +118,95 @@ class ExcelReportExporter:
                     locations[0] if locations else "",
                     locations[1] if len(locations) > 1 else "",
                     "\n".join(locations[2:]),
-                    json.dumps(finding.details, ensure_ascii=False, sort_keys=True),
+                    _summary_details_json(finding.details),
                     REVIEW_LABELS[finding.review_status],
                 ]
             )
         worksheet.freeze_panes = "A2"
         worksheet.auto_filter.ref = worksheet.dimensions
         _format_sheet(worksheet, (22, 8, 12, 24, 22, 48, 10, 48, 48, 48, 48, 12))
+
+    @staticmethod
+    def _write_numeric_evidence(workbook: Workbook, result: ScanResult) -> None:
+        worksheet = workbook.create_sheet("数值证据")
+        worksheet.append(
+            [
+                "结果 ID",
+                "检测规则",
+                "序号",
+                "来源 1",
+                "工作表 1",
+                "坐标 1",
+                "完整值 1",
+                "读取值 1",
+                "来源 2",
+                "工作表 2",
+                "坐标 2",
+                "完整值 2",
+                "关系结果",
+                "隐藏工作表",
+            ]
+        )
+        for finding in result.findings:
+            cells = finding.details.get("cells")
+            if isinstance(cells, list):
+                for index, cell in enumerate(cells, start=1):
+                    if not isinstance(cell, dict):
+                        continue
+                    worksheet.append(
+                        [
+                            finding.finding_id,
+                            finding.rule_id,
+                            index,
+                            cell.get("source_path", ""),
+                            cell.get("sheet", ""),
+                            cell.get("coordinate", ""),
+                            cell.get("canonical_value", ""),
+                            cell.get("display_value", ""),
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "是" if cell.get("hidden_sheet") else "否",
+                        ]
+                    )
+            paired_values = finding.details.get("paired_values")
+            first_series = finding.details.get("first_series")
+            second_series = finding.details.get("second_series")
+            if not (
+                isinstance(paired_values, list)
+                and isinstance(first_series, dict)
+                and isinstance(second_series, dict)
+            ):
+                continue
+            for index, pair in enumerate(paired_values, start=1):
+                if not isinstance(pair, dict):
+                    continue
+                worksheet.append(
+                    [
+                        finding.finding_id,
+                        finding.rule_id,
+                        index,
+                        first_series.get("source_path", ""),
+                        first_series.get("sheet", ""),
+                        pair.get("first_coordinate", ""),
+                        pair.get("first_value", ""),
+                        pair.get("first_value", ""),
+                        second_series.get("source_path", ""),
+                        second_series.get("sheet", ""),
+                        pair.get("second_coordinate", ""),
+                        pair.get("second_value", ""),
+                        pair.get("relation_result", ""),
+                        "",
+                    ]
+                )
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        _format_sheet(
+            worksheet,
+            (22, 28, 8, 48, 20, 12, 22, 22, 48, 20, 12, 22, 22, 12),
+        )
 
     @staticmethod
     def _write_issues(workbook: Workbook, result: ScanResult) -> None:
@@ -157,3 +240,17 @@ def _format_sheet(worksheet, widths: tuple[int, ...]) -> None:
     for row in worksheet.iter_rows(min_row=2):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+
+def _summary_details_json(details: dict) -> str:
+    summary = dict(details)
+    cells = summary.get("cells")
+    if isinstance(cells, list):
+        summary["cells"] = f"共 {len(cells)} 行，详见“数值证据”工作表"
+    paired_values = summary.get("paired_values")
+    if isinstance(paired_values, list):
+        summary["paired_values"] = f"共 {len(paired_values)} 行，详见“数值证据”工作表"
+    encoded = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+    if len(encoded) <= 32_000:
+        return encoded
+    return encoded[:31_970] + "…（内容过长，请查看数值证据工作表）"

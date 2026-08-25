@@ -58,7 +58,7 @@
 | Qt UI | `src/medical_image_check/ui/` |
 | 自动化测试 | `tests/` |
 
-当前 `BasicScanService` 已贯通输入收集、图片文件/解码像素指纹、图片整体近似候选、局部描述子索引与几何验证、Excel 数值解析、结果持久化和 UI 展示。项目清单已接入 UI，能够恢复输入路径、最近一次结果、扫描提示和报告路径。图片匹配矩形及几何参数通过稳定结果模型保存并供 UI/Excel 报告消费，消费者不读取检测器内部状态。
+当前 `BasicScanService` 已贯通输入收集、图片文件/解码像素指纹、图片整体近似候选、局部描述子索引与几何验证、Excel 数值解析/片段/近似/序列关系、结果持久化和 UI 展示。项目清单已接入 UI，能够恢复输入路径、片段设置、最近一次结果、扫描提示和报告路径。图片匹配矩形、几何参数和递归 JSON 数值证据通过稳定结果模型保存并供 UI/Excel 报告消费，消费者不读取检测器内部状态。
 
 Windows Alpha 免安装包使用 `pyside6-deploy`/Nuitka standalone 模式，由独立 GitHub Actions 工作流构建。选择与约束见 `decisions/ADR-0003-windows-portable-nuitka.md`。
 

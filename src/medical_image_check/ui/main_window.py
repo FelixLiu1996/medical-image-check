@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -120,14 +121,17 @@ class ScanWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, sources: list[str]) -> None:
+    def __init__(self, sources: list[str], minimum_digit_run: int) -> None:
         super().__init__()
         self._sources = sources
+        self._minimum_digit_run = minimum_digit_run
 
     @Slot()
     def run(self) -> None:
         try:
-            result = BasicScanService().scan(self._sources, self.progress.emit)
+            result = BasicScanService(self._minimum_digit_run).scan(
+                self._sources, self.progress.emit
+            )
         except Exception as exc:  # noqa: BLE001 - worker must report unexpected failures to UI
             self.failed.emit(str(exc))
             return
@@ -194,6 +198,16 @@ class MainWindow(QMainWindow):
         self._sources.setMinimumHeight(120)
         layout.addWidget(self._sources)
 
+        scan_settings = QHBoxLayout()
+        scan_settings.addWidget(QLabel("连续数字片段最短报警位数："))
+        self._digit_run_spin = QSpinBox()
+        self._digit_run_spin.setRange(3, 12)
+        self._digit_run_spin.setValue(4)
+        self._digit_run_spin.setToolTip("默认 4 位；数值越小召回越多，低风险结果也会明显增加。")
+        scan_settings.addWidget(self._digit_run_spin)
+        scan_settings.addStretch(1)
+        layout.addLayout(scan_settings)
+
         self._status = QLabel("请新建或打开项目，然后添加图片、Excel 或文件夹。")
         self._progress = QProgressBar()
         self._progress.setRange(0, 1)
@@ -206,17 +220,19 @@ class MainWindow(QMainWindow):
         self._results.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self._results, 1)
 
-        evidence_group = QGroupBox("图像证据预览")
+        evidence_group = QGroupBox("结果证据预览")
         evidence_layout = QVBoxLayout(evidence_group)
-        evidence_images = QHBoxLayout()
+        self._evidence_images_container = QWidget()
+        evidence_images = QHBoxLayout(self._evidence_images_container)
+        evidence_images.setContentsMargins(0, 0, 0, 0)
         self._first_evidence = ImageEvidenceView()
         self._second_evidence = ImageEvidenceView()
         evidence_images.addWidget(self._first_evidence, 1)
         evidence_images.addWidget(self._second_evidence, 1)
-        self._evidence_summary = QLabel("选择一条双图像结果后显示匹配区域和几何证据。")
+        self._evidence_summary = QLabel("选择一条结果后显示图像或数值证据。")
         self._evidence_summary.setWordWrap(True)
         self._evidence_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        evidence_layout.addLayout(evidence_images)
+        evidence_layout.addWidget(self._evidence_images_container)
         evidence_layout.addWidget(self._evidence_summary)
         layout.addWidget(evidence_group)
 
@@ -228,6 +244,7 @@ class MainWindow(QMainWindow):
         add_folder.clicked.connect(self._select_folder)
         clear.clicked.connect(self._clear_sources)
         self._scan_button.clicked.connect(self._start_scan)
+        self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
         self._results.cellClicked.connect(self._show_selected_evidence)
         self.setCentralWidget(central)
 
@@ -255,6 +272,9 @@ class MainWindow(QMainWindow):
         self._project = Project.create(name)
         self._project_path = Path(path).expanduser().resolve() if path else None
         self._current_result = None
+        self._digit_run_spin.blockSignals(True)
+        self._digit_run_spin.setValue(self._project.minimum_digit_run)
+        self._digit_run_spin.blockSignals(False)
         self._sources.clear()
         self._results.setRowCount(0)
         self._dirty = True
@@ -270,6 +290,9 @@ class MainWindow(QMainWindow):
         self._project = project
         self._project_path = project_path
         self._current_result = project.last_scan_result
+        self._digit_run_spin.blockSignals(True)
+        self._digit_run_spin.setValue(project.minimum_digit_run)
+        self._digit_run_spin.blockSignals(False)
         self._dirty = False
         self._sources.clear()
         for source in project.source_paths:
@@ -457,7 +480,8 @@ class MainWindow(QMainWindow):
         self._render_result(None)
         self._scan_button.setEnabled(False)
         self._thread = QThread(self)
-        self._worker = ScanWorker(sources)
+        minimum_digit_run = self._project.minimum_digit_run if self._project else 4
+        self._worker = ScanWorker(sources, minimum_digit_run)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._update_progress)
@@ -518,6 +542,10 @@ class MainWindow(QMainWindow):
             self._clear_evidence()
             return
         finding = self._rendered_findings[row]
+        if finding.rule_id.startswith("excel."):
+            self._evidence_images_container.hide()
+            self._evidence_summary.setText(_excel_evidence_summary_text(finding))
+            return
         if len(finding.locations) < 2 or not all(
             Path(location.source_path).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
             for location in finding.locations[:2]
@@ -525,6 +553,7 @@ class MainWindow(QMainWindow):
             self._clear_evidence("当前结果不是可并排预览的双图像证据。")
             return
 
+        self._evidence_images_container.show()
         first_region = _evidence_region(finding, "first")
         second_region = _evidence_region(finding, "second")
         self._first_evidence.set_evidence(
@@ -540,14 +569,25 @@ class MainWindow(QMainWindow):
         self._evidence_summary.setText(_evidence_summary_text(finding))
 
     def _clear_evidence(self, message: str | None = None) -> None:
+        self._evidence_images_container.show()
         self._first_evidence.set_evidence(None)
         self._second_evidence.set_evidence(None)
-        self._evidence_summary.setText(message or "选择一条双图像结果后显示匹配区域和几何证据。")
+        self._evidence_summary.setText(message or "选择一条结果后显示图像或数值证据。")
 
     @Slot(str)
     def _show_failure(self, message: str) -> None:
         self._status.setText("扫描失败")
         QMessageBox.critical(self, "扫描失败", message)
+
+    @Slot(int)
+    def _scan_settings_changed(self, minimum_digit_run: int) -> None:
+        if self._project is None or self._project.minimum_digit_run == minimum_digit_run:
+            return
+        self._project = self._project.with_minimum_digit_run(minimum_digit_run)
+        self._current_result = None
+        self._render_result(None)
+        self._mark_dirty()
+        self._status.setText(f"连续数字片段最短位数已改为 {minimum_digit_run}，原扫描结果已失效。")
 
     @Slot()
     def _cleanup_worker(self) -> None:
@@ -571,6 +611,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"医学实验图像与数据查重 · {name}{marker}")
         self._save_button.setEnabled(self._project is not None)
         self._export_button.setEnabled(self._current_result is not None)
+        self._digit_run_spin.setEnabled(self._project is not None)
 
     def _confirm_discard_changes(self) -> bool:
         if not self._dirty:
@@ -643,6 +684,67 @@ def _evidence_summary_text(finding: Finding) -> str:
         f"缩放：{details.get('scale_x_second_to_first', '-')} × "
         f"{details.get('scale_y_second_to_first', '-')}。"
     )
+
+
+def _excel_evidence_summary_text(finding: Finding) -> str:
+    fragments = finding.details.get("fragments")
+    cells = finding.details.get("cells")
+    if isinstance(cells, list):
+        if isinstance(fragments, list):
+            fragment_text = "、".join(str(fragment) for fragment in fragments[:8])
+            lines = [
+                f"匹配数字片段：{fragment_text}",
+                f"最长连续位数：{finding.details.get('maximum_length', '-')}；"
+                f"涉及 {finding.details.get('cell_count', len(cells))} 个单元格。",
+            ]
+        else:
+            lines = [
+                f"{finding.title}：{finding.description}",
+                f"绝对差：{finding.details.get('absolute_difference', '-')}；"
+                f"相对误差：{finding.details.get('relative_error_percent', '-')}%；"
+                f"档位：{finding.details.get('tolerance_band', '-')}。",
+            ]
+        for cell in cells[:12]:
+            if not isinstance(cell, dict):
+                continue
+            location = " / ".join(
+                str(value)
+                for value in (
+                    cell.get("source_path"),
+                    cell.get("sheet"),
+                    cell.get("coordinate"),
+                )
+                if value
+            )
+            lines.append(
+                f"{location}：完整值 {cell.get('canonical_value', '-')}；"
+                f"读取值 {cell.get('display_value', '-')}"
+            )
+        if len(cells) > 12:
+            lines.append(f"其余 {len(cells) - 12} 个单元格请在 Excel 报告中查看。")
+        return "\n".join(lines)
+
+    paired_values = finding.details.get("paired_values")
+    if isinstance(paired_values, list):
+        lines = [
+            f"{finding.title}：{finding.description}",
+            f"关系参数/目标：{finding.details.get('parameter', '-')}；"
+            f"连续匹配：{finding.details.get('matched_count', len(paired_values))} 组；"
+            f"对齐方式：{finding.details.get('alignment', '-')}。",
+        ]
+        for pair in paired_values[:12]:
+            if not isinstance(pair, dict):
+                continue
+            lines.append(
+                f"{pair.get('first_coordinate', '-')}={pair.get('first_value', '-')}；"
+                f"{pair.get('second_coordinate', '-')}={pair.get('second_value', '-')}；"
+                f"关系结果={pair.get('relation_result', '-')}"
+            )
+        if len(paired_values) > 12:
+            lines.append(f"其余 {len(paired_values) - 12} 组请在 Excel 报告中查看。")
+        return "\n".join(lines)
+
+    return f"{finding.title}：{finding.description}"
 
 
 def _as_percent(value: object) -> str:

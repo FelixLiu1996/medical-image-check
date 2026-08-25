@@ -7,7 +7,8 @@ from uuid import uuid4
 
 from medical_image_check.domain.models import ScanResult
 
-PROJECT_SCHEMA_VERSION = 2
+PROJECT_SCHEMA_VERSION = 3
+DEFAULT_MINIMUM_DIGIT_RUN = 4
 
 
 def _now_iso() -> str:
@@ -21,6 +22,7 @@ class Project:
     created_at: str
     updated_at: str
     source_paths: tuple[str, ...]
+    minimum_digit_run: int = DEFAULT_MINIMUM_DIGIT_RUN
     last_scan_result: ScanResult | None = None
     report_paths: tuple[str, ...] = ()
     schema_version: int = PROJECT_SCHEMA_VERSION
@@ -66,6 +68,18 @@ class Project:
 
     def with_scan_result(self, result: ScanResult) -> Project:
         return replace(self, last_scan_result=result, updated_at=_now_iso())
+
+    def with_minimum_digit_run(self, value: int) -> Project:
+        if value not in range(3, 13):
+            raise ValueError("连续数字片段最短长度必须在 3 到 12 之间")
+        if value == self.minimum_digit_run:
+            return self
+        return replace(
+            self,
+            minimum_digit_run=value,
+            last_scan_result=None,
+            updated_at=_now_iso(),
+        )
 
     def with_report(self, path: str | Path) -> Project:
         reports = {str(Path(item).expanduser().resolve()) for item in self.report_paths}

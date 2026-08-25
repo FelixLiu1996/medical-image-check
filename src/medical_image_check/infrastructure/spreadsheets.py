@@ -58,6 +58,11 @@ def canonical_numeric(value: int | float | Decimal) -> str:
     return text
 
 
+def canonical_digit_string(canonical_value: str) -> str:
+    """Remove signs and separators while preserving every canonical numeric digit."""
+    return "".join(character for character in canonical_value if character in "0123456789")
+
+
 def _numeric_value(value: object, *, is_date: bool = False) -> tuple[str, str] | None:
     if is_date or isinstance(value, (bool, date, datetime, time)):
         return None

@@ -1,11 +1,15 @@
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 import xlwt
 from openpyxl import Workbook
 
 from medical_image_check.engines.excel_exact import ExactExcelDuplicateDetector
-from medical_image_check.infrastructure.spreadsheets import SpreadsheetReader
+from medical_image_check.infrastructure.spreadsheets import (
+    SpreadsheetReader,
+    canonical_digit_string,
+)
 
 
 def _save_workbook(path: Path) -> None:
@@ -21,6 +25,13 @@ def _save_workbook(path: Path) -> None:
     second.append(["样本", "数值1", "数值2"])
     second.append(["c", 2.5, 3.5])
     second.append(["d", 0, 1])
+    workbook.save(path)
+
+
+def _save_values(path: Path, values: list[int | float]) -> None:
+    workbook = Workbook()
+    for value in values:
+        workbook.active.append([value])
     workbook.save(path)
 
 
@@ -71,3 +82,70 @@ def test_xls_reader_ignores_dates_and_reads_numbers(tmp_path: Path) -> None:
     result = SpreadsheetReader().read(path)
 
     assert [(cell.coordinate, cell.canonical_value) for cell in result.cells] == [("A1", "2.5")]
+
+
+def test_canonical_digit_string_uses_complete_value_without_separators() -> None:
+    assert canonical_digit_string("-120.034") == "120034"
+
+
+@pytest.mark.parametrize(
+    ("values", "risk", "fragment"),
+    [
+        ([14617, 94617], "low", "4617"),
+        ([1123456, 9123457], "medium", "12345"),
+        ([1123456789, 9123456780], "high", "12345678"),
+    ],
+)
+def test_detector_ranks_shared_digit_fragments_by_length(
+    tmp_path: Path,
+    values: list[int],
+    risk: str,
+    fragment: str,
+) -> None:
+    path = tmp_path / f"fragment-{risk}.xlsx"
+    _save_values(path, values)
+
+    findings, issues = ExactExcelDuplicateDetector().scan([path])
+
+    assert issues == []
+    fragments = [item for item in findings if item.rule_id == "excel.digit_fragment"]
+    assert len(fragments) == 1
+    assert fragments[0].risk == risk
+    assert fragment in fragments[0].details["fragments"]
+    assert fragments[0].details["maximum_length"] == len(fragment)
+    assert [cell["canonical_value"] for cell in fragments[0].details["cells"]] == [
+        str(value) for value in values
+    ]
+
+
+def test_digit_fragment_ignores_internal_and_exact_value_repetition(tmp_path: Path) -> None:
+    path = tmp_path / "internal-and-exact.xlsx"
+    _save_values(path, [12341234, 12341234])
+
+    findings, issues = ExactExcelDuplicateDetector().scan([path])
+
+    assert issues == []
+    assert any(item.rule_id == "excel.value.exact" for item in findings)
+    assert not any(item.rule_id == "excel.digit_fragment" for item in findings)
+
+
+def test_digit_fragment_ignores_sign_and_decimal_point(tmp_path: Path) -> None:
+    path = tmp_path / "normalized-fragment.xlsx"
+    _save_values(path, [-1234, 12.34])
+
+    findings, _ = ExactExcelDuplicateDetector().scan([path])
+
+    fragments = [item for item in findings if item.rule_id == "excel.digit_fragment"]
+    assert len(fragments) == 1
+    assert fragments[0].details["fragments"] == ["1234"]
+
+
+def test_digit_fragment_minimum_length_is_configurable(tmp_path: Path) -> None:
+    path = tmp_path / "configured-fragment.xlsx"
+    _save_values(path, [14617, 94617])
+
+    findings, _ = ExactExcelDuplicateDetector(minimum_digit_run=5).scan([path])
+
+    assert not any(item.rule_id == "excel.digit_fragment" for item in findings)
+    with pytest.raises(ValueError, match="3 到 12"):
+        ExactExcelDuplicateDetector(minimum_digit_run=2)

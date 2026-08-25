@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 
+type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
+
 
 class RiskLevel(StrEnum):
     HIGH = "high"
@@ -64,7 +66,7 @@ class Finding:
     description: str
     locations: tuple[EvidenceLocation, ...]
     confidence: float = 1.0
-    details: dict[str, str | int | float] = field(default_factory=dict)
+    details: dict[str, JsonValue] = field(default_factory=dict)
     review_status: ReviewStatus = ReviewStatus.PENDING
 
 

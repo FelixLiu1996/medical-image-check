@@ -42,7 +42,7 @@ def test_project_store_round_trip(tmp_path: Path) -> None:
         title="测试重复",
         description="用于项目恢复测试",
         locations=(EvidenceLocation(str(source)),),
-        details={"count": 1},
+        details={"count": 1, "cells": [{"coordinate": "A1", "value": "2.5"}]},
     )
     result = ScanResult(1, 1, 0, (finding,), (ScanIssue(str(source), "测试提示"),))
     project = Project.create("基础查重").with_sources([source]).with_scan_result(result)
@@ -90,3 +90,40 @@ def test_changing_project_sources_invalidates_previous_scan(tmp_path: Path) -> N
 
     assert changed.last_scan_result is None
     assert set(changed.source_paths) == {str(first.resolve()), str(second.resolve())}
+
+
+def test_project_digit_fragment_setting_persists_and_invalidates_scan(tmp_path: Path) -> None:
+    result = ScanResult(0, 0, 0, ())
+    project = Project.create("片段设置").with_scan_result(result)
+
+    changed = project.with_minimum_digit_run(6)
+    destination = tmp_path / "settings.mic-project.json"
+    ProjectStore().save(changed, destination)
+    loaded = ProjectStore().load(destination)
+
+    assert changed.last_scan_result is None
+    assert loaded.minimum_digit_run == 6
+
+
+def test_project_store_migrates_schema_version_two_digit_setting(tmp_path: Path) -> None:
+    destination = tmp_path / "schema-two.mic-project.json"
+    destination.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "project_id": "schema-two",
+                "name": "版本二项目",
+                "created_at": "2026-08-25T00:00:00+00:00",
+                "updated_at": "2026-08-25T00:00:00+00:00",
+                "source_paths": [],
+                "last_scan_result": None,
+                "report_paths": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = ProjectStore().load(destination)
+
+    assert loaded.schema_version == PROJECT_SCHEMA_VERSION
+    assert loaded.minimum_digit_run == 4

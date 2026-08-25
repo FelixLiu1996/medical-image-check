@@ -32,7 +32,7 @@ def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) ->
         "excel.value.exact",
         "excel.row.exact",
     }
-    assert result.algorithm_version == "generic-image-local-1"
+    assert result.algorithm_version == "generic-image-local-1+excel-advanced-1"
     assert result.completed_at is not None
     assert progress[-1][:2] == (3, 3)
 
@@ -53,3 +53,17 @@ def test_corrupt_workbook_does_not_abort_other_files(tmp_path: Path) -> None:
     assert result.issues[0].source_path == str(corrupt)
     assert first.read_bytes() == second.read_bytes()
     assert corrupt.read_bytes() == b"not-an-excel-archive"
+
+
+def test_basic_scan_uses_configured_digit_fragment_length(tmp_path: Path) -> None:
+    path = tmp_path / "digit-fragments.xlsx"
+    workbook = Workbook()
+    workbook.active.append([14617])
+    workbook.active.append([94617])
+    workbook.save(path)
+
+    default_result = BasicScanService().scan([path])
+    stricter_result = BasicScanService(minimum_digit_run=5).scan([path])
+
+    assert any(item.rule_id == "excel.digit_fragment" for item in default_result.findings)
+    assert not any(item.rule_id == "excel.digit_fragment" for item in stricter_result.findings)

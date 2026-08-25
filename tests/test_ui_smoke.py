@@ -33,6 +33,7 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     window = MainWindow()
     window.create_project("界面项目", project_path)
     window._append_sources([str(source)])
+    window._digit_run_spin.setValue(6)
     window._show_result(ScanResult(1, 1, 0, (), ()))
     window.save_project()
     report = window.export_excel_report(tmp_path / "ui-report.xlsx")
@@ -43,6 +44,8 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     assert restored._project is not None
     assert restored._project.name == "界面项目"
     assert restored._sources.count() == 1
+    assert restored._project.minimum_digit_run == 6
+    assert restored._digit_run_spin.value() == 6
     assert restored._current_result == ScanResult(1, 1, 0, (), ())
     assert report.exists()
 
@@ -100,6 +103,58 @@ def test_main_window_displays_local_geometric_evidence(tmp_path: Path) -> None:
     assert window._first_evidence._region == (10, 8, 60, 40)
     assert window._second_evidence._region == (5, 4, 90, 60)
     assert "几何内点：20" in window._evidence_summary.text()
+
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    workbook = tmp_path / "values.xlsx"
+    workbook.write_bytes(b"test-placeholder")
+    finding = Finding(
+        finding_id="excel-fragment",
+        rule_id="excel.digit_fragment",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="数值包含连续重复数字片段",
+        description="两个完整值共享片段 12345。",
+        locations=(
+            EvidenceLocation(str(workbook), "Sheet1", "A1"),
+            EvidenceLocation(str(workbook), "Sheet1", "A2"),
+        ),
+        confidence=0.7,
+        details={
+            "fragments": ["12345"],
+            "maximum_length": 5,
+            "cell_count": 2,
+            "cells": [
+                {
+                    "source_path": str(workbook),
+                    "sheet": "Sheet1",
+                    "coordinate": "A1",
+                    "canonical_value": "1123456",
+                    "display_value": "1123456",
+                },
+                {
+                    "source_path": str(workbook),
+                    "sheet": "Sheet1",
+                    "coordinate": "A2",
+                    "canonical_value": "9123457",
+                    "display_value": "9123457",
+                },
+            ],
+        },
+    )
+    window = MainWindow()
+    window._render_result(ScanResult(1, 0, 1, (finding,)))
+
+    window._show_selected_evidence(0)
+
+    summary = window._evidence_summary.text()
+    assert "匹配数字片段：12345" in summary
+    assert "完整值 1123456" in summary
+    assert window._evidence_images_container.isHidden()
 
     window.close()
     app.processEvents()
