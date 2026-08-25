@@ -67,6 +67,7 @@
 - 本阶段 Windows/Linux CI、Windows standalone 编译、打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均已通过。
 - Excel 已确认数值规则的全局扫描 Alpha 基线已补齐；自动识别实验组与手动框选尚未进入当前 GUI。
 - 扫描算法升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`，软件版本升级为 `0.1.0a8`。
+- 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
 
 ## 下一步
 
@@ -122,3 +123,4 @@
 - ReportLab、Pillow、charset-normalizer 的实际 wheel 许可证收集通过
 - 扫描控制与三格式报告阶段 GitHub CI Windows/Linux 通过（run `32844253484`）
 - Windows portable `0.1.0a7` standalone 构建和打包程序三报告冒烟通过（run `32844253505`，总耗时 22 分 18 秒）；Actions 工件 `MedicalImageCheck-windows-x64-portable` 为 92.1 MB，artifact digest 为 `63d43c1488b5798e28ceccc57185617c3e4ad4c688868658fdf8fc52e6068e74`
+- Excel `0.1.0a8` 最新源码 CI Windows/Linux 通过（run `32849587649`）；Windows portable run `32849587674` 完成 standalone、程序三报告冒烟、许可证收集、ZIP 组装和上传，工件 92.3 MB，artifact digest 为 `4b395721340e286b9ae278c58c0ee5c5292ca2d68b1c9290c7bd6aa12cf21083`

@@ -89,3 +89,4 @@
 - PDF：两页中文样例通过 Poppler 全页渲染目视检查，标题/结果/图像证据/扫描提示文本层经 pypdf 验证可检索；ReportLab/Pillow/charset-normalizer 许可证收集通过。
 - 远程验收：GitHub CI Windows/Linux run `32844253484` 通过；Windows portable run `32844253505` 完成 standalone、打包 EXE 三报告冒烟、许可证收集和上传，工件 92.1 MB，artifact digest `63d43c1488b5798e28ceccc57185617c3e4ad4c688868658fdf8fc52e6068e74`。
 - `excel-advanced-2` 合成测试覆盖自定义容差、四则运算、连续片段、乱序、少量修改、二维区域、稳健线性、汇总/分布统计、schema 5 和 GUI 参数恢复；80,000 个内存数值单元格压力检查约 3.3 秒、最大 RSS 约 95 MiB（不含读取、旧规则和报告）。
+- Excel `0.1.0a8` 最新源码 CI Windows/Linux run `32849587649` 通过；Windows portable run `32849587674` 完成 standalone、程序三报告冒烟、许可证收集、ZIP 组装和上传，工件 92.3 MB，artifact digest `4b395721340e286b9ae278c58c0ee5c5292ca2d68b1c9290c7bd6aa12cf21083`。
