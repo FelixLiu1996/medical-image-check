@@ -16,6 +16,26 @@ def _synthetic_image() -> np.ndarray:
     return image
 
 
+def _synthetic_local_image(seed: int = 20260825) -> np.ndarray:
+    random = np.random.default_rng(seed)
+    image = random.integers(10, 90, size=(480, 640, 3), dtype=np.uint8)
+    for _ in range(35):
+        x = int(random.integers(10, 600))
+        y = int(random.integers(10, 440))
+        color = tuple(int(value) for value in random.integers(100, 255, size=3))
+        cv2.circle(image, (x, y), int(random.integers(4, 20)), color, -1)
+    cv2.putText(
+        image,
+        "MEDICAL 2026",
+        (80, 240),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        2,
+        (245, 245, 245),
+        5,
+    )
+    return image
+
+
 def test_detector_finds_same_decoded_pixels_across_formats(tmp_path: Path) -> None:
     image = _synthetic_image()
     png = tmp_path / "source.png"
@@ -81,3 +101,73 @@ def test_detector_reports_corrupt_image_without_aborting(tmp_path: Path) -> None
     assert findings == []
     assert len(issues) == 1
     assert issues[0].source_path == str(corrupt)
+
+
+def test_detector_finds_rotated_rescaled_crop_with_geometric_evidence(tmp_path: Path) -> None:
+    image = _synthetic_local_image()
+    cropped = image[105:405, 170:550]
+    transformed = cv2.resize(
+        np.rot90(cropped, 1),
+        (330, 420),
+        interpolation=cv2.INTER_AREA,
+    )
+    source = tmp_path / "source.png"
+    reused = tmp_path / "reused-crop.jpg"
+    assert cv2.imwrite(str(source), image)
+    assert cv2.imwrite(
+        str(reused),
+        transformed,
+        [cv2.IMWRITE_JPEG_QUALITY, 92],
+    )
+
+    findings, issues = ImageDuplicateDetector().scan([source, reused])
+
+    assert issues == []
+    local = [item for item in findings if item.rule_id == "image.local.geometric"]
+    assert len(local) == 1
+    assert local[0].risk == "medium"
+    assert local[0].details["inlier_count"] >= 8
+    assert local[0].details["inlier_ratio"] >= 0.5
+    assert local[0].details["first_region_width"] > 0
+    assert local[0].details["second_region_height"] > 0
+    assert abs(local[0].details["rotation_degrees_second_to_first"]) >= 80
+
+
+def test_detector_does_not_report_unrelated_local_images(tmp_path: Path) -> None:
+    paths: list[Path] = []
+    for index, seed in enumerate((11, 22, 33), start=1):
+        path = tmp_path / f"unrelated-{index}.png"
+        assert cv2.imwrite(str(path), _synthetic_local_image(seed))
+        paths.append(path)
+
+    findings, issues = ImageDuplicateDetector().scan(paths)
+
+    assert issues == []
+    assert not any(item.rule_id == "image.local.geometric" for item in findings)
+
+
+def test_detector_finds_partial_overlap_between_two_crops(tmp_path: Path) -> None:
+    random = np.random.default_rng(77)
+    image = random.integers(0, 100, size=(600, 800, 3), dtype=np.uint8)
+    for _ in range(60):
+        x = int(random.integers(10, 790))
+        y = int(random.integers(10, 590))
+        color = tuple(int(value) for value in random.integers(120, 255, size=3))
+        cv2.circle(image, (x, y), int(random.integers(4, 18)), color, -1)
+    first = tmp_path / "left-crop.png"
+    second = tmp_path / "right-crop.jpg"
+    assert cv2.imwrite(str(first), image[40:440, 30:530])
+    assert cv2.imwrite(
+        str(second),
+        image[160:560, 280:780],
+        [cv2.IMWRITE_JPEG_QUALITY, 90],
+    )
+
+    findings, issues = ImageDuplicateDetector().scan([first, second])
+
+    assert issues == []
+    local = [item for item in findings if item.rule_id == "image.local.geometric"]
+    assert len(local) == 1
+    assert local[0].details["inlier_count"] >= 8
+    assert 0.05 <= local[0].details["first_coverage"] < 0.8
+    assert 0.05 <= local[0].details["second_coverage"] < 0.8

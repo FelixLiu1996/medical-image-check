@@ -58,14 +58,14 @@
 | Qt UI | `src/medical_image_check/ui/` |
 | 自动化测试 | `tests/` |
 
-当前 `BasicScanService` 已贯通输入收集、图片文件/解码像素指纹、图片整体近似候选、Excel 数值解析、结果持久化和 UI 展示。项目清单已接入 UI，能够恢复输入路径、最近一次结果、扫描提示和报告路径。Excel 报告通过稳定结果模型导出，不读取检测器内部状态。
+当前 `BasicScanService` 已贯通输入收集、图片文件/解码像素指纹、图片整体近似候选、局部描述子索引与几何验证、Excel 数值解析、结果持久化和 UI 展示。项目清单已接入 UI，能够恢复输入路径、最近一次结果、扫描提示和报告路径。图片匹配矩形及几何参数通过稳定结果模型保存并供 UI/Excel 报告消费，消费者不读取检测器内部状态。
 
 Windows Alpha 免安装包使用 `pyside6-deploy`/Nuitka standalone 模式，由独立 GitHub Actions 工作流构建。选择与约束见 `decisions/ADR-0003-windows-portable-nuitka.md`。
 
 ## 尚未决定
 
 - 持久化数据库及迁移框架。
-- 局部图像索引和近邻检索实现；当前只有全局感知指纹分段索引。
+- 局部特征的持久化索引和历史库近邻检索；当前倒排索引仅在单次扫描内存中建立。
 - ONNX Runtime 或其他推理运行时的最终选择。
 - 安装器实现；免安装包已建立原型但仍待干净 Windows 环境验证。
 

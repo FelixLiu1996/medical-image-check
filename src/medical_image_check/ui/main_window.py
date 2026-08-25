@@ -2,10 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal, Slot
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QColor,
+    QImage,
+    QImageReader,
+    QKeySequence,
+    QPainter,
+    QPaintEvent,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -20,8 +31,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from medical_image_check.domain.models import RiskLevel, ScanResult
+from medical_image_check.domain.models import EvidenceLocation, Finding, RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
+from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
 from medical_image_check.services.basic_scan import BasicScanService
 from medical_image_check.services.excel_report import ExcelReportExporter
@@ -32,6 +44,75 @@ RISK_LABELS = {
     RiskLevel.MEDIUM: "中",
     RiskLevel.LOW: "低",
 }
+
+
+class ImageEvidenceView(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumHeight(210)
+        self._source_path: str | None = None
+        self._page = 1
+        self._image = QImage()
+        self._region: tuple[int, int, int, int] | None = None
+
+    def set_evidence(
+        self,
+        source_path: str | None,
+        region: tuple[int, int, int, int] | None = None,
+        page: int = 1,
+    ) -> None:
+        self._source_path = source_path
+        self._page = max(1, page)
+        self._image = _read_evidence_image(source_path, self._page)
+        self._region = region
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        del event
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#f5f7fa"))
+        painter.setPen(QColor("#52606d"))
+        if not self._source_path:
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "请选择一条双图像结果")
+            return
+        if self._image.isNull():
+            painter.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                f"图片无法预览或已移动\n{self._source_path}",
+            )
+            return
+
+        page_text = f" · 第 {self._page} 页" if self._page > 1 else ""
+        painter.drawText(8, 20, f"{Path(self._source_path).name}{page_text}")
+        available = QRectF(8, 28, max(1, self.width() - 16), max(1, self.height() - 36))
+        image_ratio = self._image.width() / max(self._image.height(), 1)
+        available_ratio = available.width() / max(available.height(), 1)
+        if image_ratio >= available_ratio:
+            target_width = available.width()
+            target_height = target_width / image_ratio
+        else:
+            target_height = available.height()
+            target_width = target_height * image_ratio
+        target = QRectF(
+            available.x() + (available.width() - target_width) / 2,
+            available.y() + (available.height() - target_height) / 2,
+            target_width,
+            target_height,
+        )
+        painter.drawImage(target, self._image)
+        painter.setPen(QPen(QColor("#e12d39"), 3))
+        painter.drawRect(target)
+        if self._region is not None:
+            x, y, width, height = self._region
+            evidence_rect = QRectF(
+                target.x() + x * target.width() / self._image.width(),
+                target.y() + y * target.height() / self._image.height(),
+                width * target.width() / self._image.width(),
+                height * target.height() / self._image.height(),
+            )
+            painter.setPen(QPen(QColor("#ffb000"), 4))
+            painter.drawRect(evidence_rect)
 
 
 class ScanWorker(QObject):
@@ -62,6 +143,7 @@ class MainWindow(QMainWindow):
         self._project: Project | None = None
         self._project_path: Path | None = None
         self._current_result: ScanResult | None = None
+        self._rendered_findings: list[Finding] = []
         self._dirty = False
         self._project_store = ProjectStore()
         self._report_exporter = ExcelReportExporter()
@@ -75,7 +157,7 @@ class MainWindow(QMainWindow):
 
         title = QLabel("医学实验图像与数据查重")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        subtitle = QLabel("当前 Alpha 支持项目与 Excel 报告、图片文件/解码像素重复及整体近似查重。")
+        subtitle = QLabel("当前 Alpha 支持项目与 Excel 报告、图片完全/整体近似及局部裁剪重叠查重。")
         subtitle.setStyleSheet("color: #666;")
         self._project_label = QLabel()
         self._project_label.setStyleSheet("color: #1f4e78; font-weight: 600;")
@@ -124,6 +206,20 @@ class MainWindow(QMainWindow):
         self._results.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self._results, 1)
 
+        evidence_group = QGroupBox("图像证据预览")
+        evidence_layout = QVBoxLayout(evidence_group)
+        evidence_images = QHBoxLayout()
+        self._first_evidence = ImageEvidenceView()
+        self._second_evidence = ImageEvidenceView()
+        evidence_images.addWidget(self._first_evidence, 1)
+        evidence_images.addWidget(self._second_evidence, 1)
+        self._evidence_summary = QLabel("选择一条双图像结果后显示匹配区域和几何证据。")
+        self._evidence_summary.setWordWrap(True)
+        self._evidence_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        evidence_layout.addLayout(evidence_images)
+        evidence_layout.addWidget(self._evidence_summary)
+        layout.addWidget(evidence_group)
+
         new_project.clicked.connect(self._new_project_dialog)
         open_project.clicked.connect(self._open_project_dialog)
         self._save_button.clicked.connect(self._save_current_project)
@@ -132,6 +228,7 @@ class MainWindow(QMainWindow):
         add_folder.clicked.connect(self._select_folder)
         clear.clicked.connect(self._clear_sources)
         self._scan_button.clicked.connect(self._start_scan)
+        self._results.cellClicked.connect(self._show_selected_evidence)
         self.setCentralWidget(central)
 
     def _build_menu(self) -> None:
@@ -343,7 +440,7 @@ class MainWindow(QMainWindow):
         if self._project is not None:
             self._project = self._project.replace_sources([])
             self._current_result = None
-            self._results.setRowCount(0)
+            self._render_result(None)
             self._mark_dirty()
         self._status.setText("输入已清空。")
 
@@ -357,7 +454,7 @@ class MainWindow(QMainWindow):
             self.create_project("未命名项目")
             self._project = self._project.with_sources(sources)
 
-        self._results.setRowCount(0)
+        self._render_result(None)
         self._scan_button.setEnabled(False)
         self._thread = QThread(self)
         self._worker = ScanWorker(sources)
@@ -396,9 +493,12 @@ class MainWindow(QMainWindow):
 
     def _render_result(self, result: ScanResult | None) -> None:
         self._results.setRowCount(0)
+        self._rendered_findings = []
+        self._clear_evidence()
         if result is None:
             return
         for finding in result.findings:
+            self._rendered_findings.append(finding)
             row = self._results.rowCount()
             self._results.insertRow(row)
             locations = "\n".join(location.display_text for location in finding.locations)
@@ -410,6 +510,39 @@ class MainWindow(QMainWindow):
             ]
             for column, value in enumerate(values):
                 self._results.setItem(row, column, QTableWidgetItem(value))
+
+    @Slot(int, int)
+    def _show_selected_evidence(self, row: int, column: int = 0) -> None:
+        del column
+        if row < 0 or row >= len(self._rendered_findings):
+            self._clear_evidence()
+            return
+        finding = self._rendered_findings[row]
+        if len(finding.locations) < 2 or not all(
+            Path(location.source_path).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+            for location in finding.locations[:2]
+        ):
+            self._clear_evidence("当前结果不是可并排预览的双图像证据。")
+            return
+
+        first_region = _evidence_region(finding, "first")
+        second_region = _evidence_region(finding, "second")
+        self._first_evidence.set_evidence(
+            finding.locations[0].source_path,
+            first_region,
+            _evidence_page(finding.locations[0]),
+        )
+        self._second_evidence.set_evidence(
+            finding.locations[1].source_path,
+            second_region,
+            _evidence_page(finding.locations[1]),
+        )
+        self._evidence_summary.setText(_evidence_summary_text(finding))
+
+    def _clear_evidence(self, message: str | None = None) -> None:
+        self._first_evidence.set_evidence(None)
+        self._second_evidence.set_evidence(None)
+        self._evidence_summary.setText(message or "选择一条双图像结果后显示匹配区域和几何证据。")
 
     @Slot(str)
     def _show_failure(self, message: str) -> None:
@@ -462,3 +595,58 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
+
+
+def _evidence_region(finding: Finding, prefix: str) -> tuple[int, int, int, int] | None:
+    keys = tuple(f"{prefix}_region_{suffix}" for suffix in ("x", "y", "width", "height"))
+    if not all(key in finding.details for key in keys):
+        return None
+    try:
+        values = [int(finding.details[key]) for key in keys]
+        return values[0], values[1], values[2], values[3]
+    except (TypeError, ValueError):
+        return None
+
+
+def _evidence_page(location: EvidenceLocation) -> int:
+    coordinate = location.coordinate or ""
+    if coordinate.startswith("第 ") and coordinate.endswith(" 页"):
+        try:
+            return max(1, int(coordinate[2:-2]))
+        except ValueError:
+            pass
+    return 1
+
+
+def _read_evidence_image(source_path: str | None, page: int) -> QImage:
+    if not source_path:
+        return QImage()
+    reader = QImageReader(source_path)
+    reader.setAutoTransform(True)
+    if page > 1 and not reader.jumpToImage(page - 1):
+        return QImage()
+    return reader.read()
+
+
+def _evidence_summary_text(finding: Finding) -> str:
+    details = finding.details
+    if finding.rule_id != "image.local.geometric":
+        return f"{finding.title}：{finding.description}"
+    return (
+        f"几何模型：{details.get('transform_model', '-')}；"
+        f"双向匹配点：{details.get('matched_keypoints', '-')}；"
+        f"几何内点：{details.get('inlier_count', '-')}；"
+        f"内点比例：{_as_percent(details.get('inlier_ratio'))}；"
+        f"区域覆盖：{_as_percent(details.get('first_coverage'))} / "
+        f"{_as_percent(details.get('second_coverage'))}；"
+        f"旋转：{details.get('rotation_degrees_second_to_first', '-')}°；"
+        f"缩放：{details.get('scale_x_second_to_first', '-')} × "
+        f"{details.get('scale_y_second_to_first', '-')}。"
+    )
+
+
+def _as_percent(value: object) -> str:
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "-"

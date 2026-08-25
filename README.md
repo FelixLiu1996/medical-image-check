@@ -42,6 +42,8 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - 项目新建、打开、保存、旧格式迁移和最近扫描结果恢复；
 - 图片文件 SHA-256、跨格式解码像素指纹和整体感知近似候选；
 - 多页 TIFF 逐页处理，以及旋转、翻转、压缩和缩放的全局候选；
+- ORB 局部候选索引与 RANSAC 几何验证，可检测裁剪、大图包含小图和部分重叠；
+- 双图并排证据预览、两侧匹配矩形及匹配点/内点/覆盖率/几何变换说明；
 - xlsx、xlsm、xls、csv 数值读取；
 - Excel 完整数值和数值行重复检测；
 - 隐藏工作表扫描、公式缓存缺失提示和损坏文件隔离；
@@ -49,7 +51,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
-当前感知近似只作为中/低风险候选。局部图像重叠、Copy-Move、数字片段、近似值、专项医学图像算法、历史库和 HTML/PDF 完整报告仍在后续里程碑。
+当前整体感知和局部几何结果只作为中/低风险候选。单图 Copy-Move、数字片段、近似值、专项医学图像算法、历史库和 HTML/PDF 完整报告仍在后续里程碑。
 
 ## 本地开发
 

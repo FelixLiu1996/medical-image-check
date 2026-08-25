@@ -3,9 +3,14 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from hashlib import sha256
 from itertools import combinations
 from pathlib import Path
+
+import cv2
+import numpy as np
+from numpy.typing import NDArray
 
 from medical_image_check.domain.models import (
     EvidenceLocation,
@@ -28,6 +33,7 @@ class ImageDuplicateDetector:
     file_rule_id = "image.file.sha256"
     pixel_rule_id = "image.pixel.sha256"
     perceptual_rule_id = "image.global.perceptual"
+    local_rule_id = "image.local.geometric"
 
     def scan(
         self,
@@ -54,7 +60,10 @@ class ImageDuplicateDetector:
         pixel_findings, pixel_pairs = self._pixel_findings(features, file_hashes)
         findings.extend(pixel_findings)
         exact_pairs.update(pixel_pairs)
-        findings.extend(self._perceptual_findings(features, exact_pairs))
+        perceptual_findings, perceptual_pairs = self._perceptual_findings(features, exact_pairs)
+        findings.extend(perceptual_findings)
+        exact_pairs.update(perceptual_pairs)
+        findings.extend(self._local_findings(features, exact_pairs))
         return findings, issues
 
     def _file_findings(
@@ -131,8 +140,9 @@ class ImageDuplicateDetector:
         self,
         features: list[ImageFeature],
         exact_pairs: set[tuple[str, str]],
-    ) -> list[Finding]:
+    ) -> tuple[list[Finding], set[tuple[str, str]]]:
         findings: list[Finding] = []
+        matched_pairs: set[tuple[str, str]] = set()
         for first_index, second_index in _candidate_pairs(features):
             first = features[first_index]
             second = features[second_index]
@@ -147,6 +157,7 @@ class ImageDuplicateDetector:
             match = _best_match(first, second)
             if match is None:
                 continue
+            matched_pairs.add(pair_key)
             transform, phash_distance, dhash_distance, similarity = match
             locations = (_location(first), _location(second))
             confidence = max(
@@ -185,7 +196,323 @@ class ImageDuplicateDetector:
                     },
                 )
             )
+        return findings, matched_pairs
+
+    def _local_findings(
+        self,
+        features: list[ImageFeature],
+        excluded_pairs: set[tuple[str, str]],
+    ) -> list[Finding]:
+        findings: list[Finding] = []
+        for first_index, second_index in sorted(_local_candidate_pairs(features, excluded_pairs)):
+            first = features[first_index]
+            second = features[second_index]
+            match = _geometric_match(first, second)
+            if match is None:
+                continue
+            locations = (_location(first), _location(second))
+            risk = RiskLevel.MEDIUM if match.confidence >= 0.72 else RiskLevel.LOW
+            findings.append(
+                Finding(
+                    finding_id=deterministic_finding_id(self.local_rule_id, locations),
+                    rule_id=self.local_rule_id,
+                    finding_type=FindingType.SUSPECTED_REUSE,
+                    risk=risk,
+                    title="图片存在局部重叠",
+                    description=(
+                        "局部关键点经过双向匹配和几何一致性验证，可能存在裁剪、缩放、旋转或部分重叠。"
+                    ),
+                    locations=locations,
+                    confidence=match.confidence,
+                    details=match.details,
+                )
+            )
         return findings
+
+
+LOCAL_INDEX_DESCRIPTOR_LIMIT = 96
+LOCAL_SIGNATURE_OFFSETS = (0, 4, 8, 12, 16, 20, 24, 28)
+LOCAL_SIGNATURE_BUCKET_LIMIT = 64
+LOCAL_CANDIDATE_MAX_DISTANCE = 56
+LOCAL_CANDIDATE_MIN_VOTES = 3
+LOCAL_MATCH_MAX_DISTANCE = 64
+LOCAL_MATCH_RATIO = 0.80
+LOCAL_MIN_MATCHES = 8
+LOCAL_MIN_INLIERS = 8
+LOCAL_MIN_INLIER_RATIO = 0.50
+
+
+@dataclass(frozen=True, slots=True)
+class _ModelEstimate:
+    model: str
+    matrix: NDArray[np.float64]
+    inliers: NDArray[np.bool_]
+    median_error: float
+
+    @property
+    def inlier_count(self) -> int:
+        return int(np.count_nonzero(self.inliers))
+
+
+@dataclass(frozen=True, slots=True)
+class _GeometricMatch:
+    confidence: float
+    details: dict[str, str | int | float]
+
+
+def _local_candidate_pairs(
+    features: list[ImageFeature],
+    excluded_pairs: set[tuple[str, str]],
+) -> set[tuple[int, int]]:
+    index: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    votes: dict[tuple[int, int], int] = defaultdict(int)
+    for feature_index, feature in enumerate(features):
+        descriptors = feature.local_descriptors[:LOCAL_INDEX_DESCRIPTOR_LIMIT]
+        for descriptor in descriptors:
+            descriptor_value = int.from_bytes(descriptor.tobytes(), "little")
+            matched_features: set[int] = set()
+            for band, offset in enumerate(LOCAL_SIGNATURE_OFFSETS):
+                signature = int.from_bytes(descriptor[offset : offset + 2].tobytes(), "little")
+                key = (band, signature)
+                bucket = index[key]
+                for previous_index, previous_value in bucket:
+                    if previous_index == feature_index:
+                        continue
+                    pair_key = _feature_pair_key(
+                        features[previous_index].source_path,
+                        features[previous_index].page,
+                        feature.source_path,
+                        feature.page,
+                    )
+                    if pair_key in excluded_pairs:
+                        continue
+                    if (descriptor_value ^ previous_value).bit_count() <= (
+                        LOCAL_CANDIDATE_MAX_DISTANCE
+                    ):
+                        matched_features.add(previous_index)
+                if len(bucket) < LOCAL_SIGNATURE_BUCKET_LIMIT:
+                    bucket.append((feature_index, descriptor_value))
+            for previous_index in matched_features:
+                votes[(previous_index, feature_index)] += 1
+    return {pair for pair, vote_count in votes.items() if vote_count >= LOCAL_CANDIDATE_MIN_VOTES}
+
+
+def _geometric_match(first: ImageFeature, second: ImageFeature) -> _GeometricMatch | None:
+    matches = _mutual_ratio_matches(first.local_descriptors, second.local_descriptors)
+    if len(matches) < LOCAL_MIN_MATCHES:
+        return None
+
+    first_points = np.asarray(
+        [first.local_keypoints[first_index] for first_index, _, _ in matches],
+        dtype=np.float32,
+    )
+    second_points = np.asarray(
+        [second.local_keypoints[second_index] for _, second_index, _ in matches],
+        dtype=np.float32,
+    )
+    threshold = max(
+        3.0,
+        0.004 * min(math.hypot(first.width, first.height), math.hypot(second.width, second.height)),
+    )
+    estimates = _estimate_models(second_points, first_points, threshold)
+    if not estimates:
+        return None
+    estimate = max(
+        estimates,
+        key=lambda item: (
+            item.inlier_count - (2 if item.model == "homography" else 0),
+            -item.median_error,
+        ),
+    )
+    inlier_ratio = estimate.inlier_count / len(matches)
+    if estimate.inlier_count < LOCAL_MIN_INLIERS or inlier_ratio < LOCAL_MIN_INLIER_RATIO:
+        return None
+
+    first_inliers = first_points[estimate.inliers]
+    second_inliers = second_points[estimate.inliers]
+    first_region = _bounding_region(first_inliers, first.width, first.height)
+    second_region = _bounding_region(second_inliers, second.width, second.height)
+    first_coverage = first_region[2] * first_region[3] / max(first.width * first.height, 1)
+    second_coverage = second_region[2] * second_region[3] / max(second.width * second.height, 1)
+    if max(first_coverage, second_coverage) < 0.08 or min(first_coverage, second_coverage) < 0.01:
+        return None
+
+    scale_x, scale_y, rotation = _transform_summary(
+        estimate.matrix,
+        estimate.model,
+        second.width / 2,
+        second.height / 2,
+    )
+    error_score = max(0.0, 1.0 - estimate.median_error / max(threshold, 1e-6))
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            0.30 * min(estimate.inlier_count / 30, 1.0)
+            + 0.25 * inlier_ratio
+            + 0.25 * min(max(first_coverage, second_coverage) / 0.40, 1.0)
+            + 0.20 * error_score,
+        ),
+    )
+    details: dict[str, str | int | float] = {
+        "transform_model": estimate.model,
+        "matched_keypoints": len(matches),
+        "inlier_count": estimate.inlier_count,
+        "inlier_ratio": round(inlier_ratio, 6),
+        "median_reprojection_error": round(estimate.median_error, 4),
+        "ransac_threshold": round(threshold, 4),
+        "first_region_x": first_region[0],
+        "first_region_y": first_region[1],
+        "first_region_width": first_region[2],
+        "first_region_height": first_region[3],
+        "second_region_x": second_region[0],
+        "second_region_y": second_region[1],
+        "second_region_width": second_region[2],
+        "second_region_height": second_region[3],
+        "first_coverage": round(first_coverage, 6),
+        "second_coverage": round(second_coverage, 6),
+        "scale_x_second_to_first": round(scale_x, 6),
+        "scale_y_second_to_first": round(scale_y, 6),
+        "rotation_degrees_second_to_first": round(rotation, 4),
+        "first_size": f"{first.width}x{first.height}",
+        "second_size": f"{second.width}x{second.height}",
+    }
+    return _GeometricMatch(confidence=round(confidence, 6), details=details)
+
+
+def _mutual_ratio_matches(
+    first: NDArray[np.uint8],
+    second: NDArray[np.uint8],
+) -> list[tuple[int, int, float]]:
+    if len(first) < 2 or len(second) < 2:
+        return []
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+    forward = _ratio_matches(matcher, first, second)
+    backward = _ratio_matches(matcher, second, first)
+    backward_pairs = {(train_index, query_index) for query_index, train_index, _ in backward}
+    return [match for match in forward if (match[0], match[1]) in backward_pairs]
+
+
+def _ratio_matches(
+    matcher: cv2.BFMatcher,
+    query: NDArray[np.uint8],
+    train: NDArray[np.uint8],
+) -> list[tuple[int, int, float]]:
+    accepted: list[tuple[int, int, float]] = []
+    for neighbors in matcher.knnMatch(query, train, k=2):
+        if len(neighbors) < 2:
+            continue
+        best, second_best = neighbors
+        if (
+            best.distance <= LOCAL_MATCH_MAX_DISTANCE
+            and best.distance < LOCAL_MATCH_RATIO * second_best.distance
+        ):
+            accepted.append((best.queryIdx, best.trainIdx, float(best.distance)))
+    return accepted
+
+
+def _estimate_models(
+    source: NDArray[np.float32],
+    destination: NDArray[np.float32],
+    threshold: float,
+) -> list[_ModelEstimate]:
+    estimates: list[_ModelEstimate] = []
+    affine, affine_mask = cv2.estimateAffinePartial2D(
+        source,
+        destination,
+        method=cv2.RANSAC,
+        ransacReprojThreshold=threshold,
+        maxIters=4000,
+        confidence=0.995,
+        refineIters=10,
+    )
+    if affine is not None and affine_mask is not None:
+        estimates.append(_model_estimate("affine", affine, affine_mask, source, destination))
+
+    if len(source) >= 10:
+        homography, homography_mask = cv2.findHomography(
+            source,
+            destination,
+            method=cv2.RANSAC,
+            ransacReprojThreshold=threshold,
+            maxIters=4000,
+            confidence=0.995,
+        )
+        if homography is not None and homography_mask is not None:
+            estimates.append(
+                _model_estimate("homography", homography, homography_mask, source, destination)
+            )
+    return estimates
+
+
+def _model_estimate(
+    model: str,
+    matrix: NDArray,
+    mask: NDArray,
+    source: NDArray[np.float32],
+    destination: NDArray[np.float32],
+) -> _ModelEstimate:
+    inliers = mask.reshape(-1).astype(bool)
+    if model == "homography":
+        projected = cv2.perspectiveTransform(source.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+    else:
+        projected = cv2.transform(source.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+    errors = np.linalg.norm(projected - destination, axis=1)
+    median_error = float(np.median(errors[inliers])) if np.any(inliers) else math.inf
+    return _ModelEstimate(
+        model=model,
+        matrix=np.asarray(matrix, dtype=np.float64),
+        inliers=inliers,
+        median_error=median_error,
+    )
+
+
+def _bounding_region(
+    points: NDArray[np.float32], width: int, height: int
+) -> tuple[int, int, int, int]:
+    minimum = np.floor(np.min(points, axis=0)).astype(int)
+    maximum = np.ceil(np.max(points, axis=0)).astype(int)
+    x = max(0, min(int(minimum[0]), width - 1))
+    y = max(0, min(int(minimum[1]), height - 1))
+    right = max(x + 1, min(int(maximum[0]) + 1, width))
+    bottom = max(y + 1, min(int(maximum[1]) + 1, height))
+    return x, y, right - x, bottom - y
+
+
+def _transform_summary(
+    matrix: NDArray[np.float64],
+    model: str,
+    center_x: float,
+    center_y: float,
+) -> tuple[float, float, float]:
+    linear = matrix[:2, :2]
+    if model == "homography":
+        denominator = float(matrix[2, 0] * center_x + matrix[2, 1] * center_y + matrix[2, 2])
+        if abs(denominator) > 1e-12:
+            numerator_x = float(matrix[0, 0] * center_x + matrix[0, 1] * center_y + matrix[0, 2])
+            numerator_y = float(matrix[1, 0] * center_x + matrix[1, 1] * center_y + matrix[1, 2])
+            denominator_squared = denominator**2
+            linear = np.asarray(
+                [
+                    [
+                        (matrix[0, 0] * denominator - matrix[2, 0] * numerator_x)
+                        / denominator_squared,
+                        (matrix[0, 1] * denominator - matrix[2, 1] * numerator_x)
+                        / denominator_squared,
+                    ],
+                    [
+                        (matrix[1, 0] * denominator - matrix[2, 0] * numerator_y)
+                        / denominator_squared,
+                        (matrix[1, 1] * denominator - matrix[2, 1] * numerator_y)
+                        / denominator_squared,
+                    ],
+                ],
+                dtype=np.float64,
+            )
+    scale_x = float(math.hypot(linear[0, 0], linear[1, 0]))
+    scale_y = float(math.hypot(linear[0, 1], linear[1, 1]))
+    rotation = math.degrees(math.atan2(linear[1, 0], linear[0, 0]))
+    return scale_x, scale_y, rotation
 
 
 def _candidate_pairs(features: list[ImageFeature]) -> set[tuple[int, int]]:

@@ -9,6 +9,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 THUMBNAIL_SIZE = 64
+LOCAL_FEATURE_MAX_DIMENSION = 1600
+LOCAL_FEATURE_LIMIT = 1200
+LOCAL_FEATURE_GRID_SIZE = 4
 TRANSFORMS = (
     "identity",
     "rotate_90",
@@ -39,6 +42,8 @@ class ImageFeature:
     thumbnail: NDArray[np.float32]
     standard_deviation: float
     fingerprints: tuple[TransformFingerprint, ...]
+    local_keypoints: NDArray[np.float32]
+    local_descriptors: NDArray[np.uint8]
 
     @property
     def identity_fingerprint(self) -> TransformFingerprint:
@@ -61,6 +66,7 @@ def extract_image_features(path: str | Path, data: bytes | None = None) -> tuple
             interpolation=cv2.INTER_AREA,
         )
         normalized = _normalize_thumbnail(thumbnail_u8)
+        local_keypoints, local_descriptors = _extract_local_features(gray)
         fingerprints = tuple(
             TransformFingerprint(
                 transform=transform,
@@ -81,6 +87,8 @@ def extract_image_features(path: str | Path, data: bytes | None = None) -> tuple
                 thumbnail=normalized,
                 standard_deviation=float(np.std(thumbnail_u8)),
                 fingerprints=fingerprints,
+                local_keypoints=local_keypoints,
+                local_descriptors=local_descriptors,
             )
         )
     return tuple(features)
@@ -173,6 +181,75 @@ def _normalize_thumbnail(image: NDArray[np.uint8]) -> NDArray[np.float32]:
     if deviation <= 1e-6:
         return np.zeros_like(values, dtype=np.float32)
     return np.ascontiguousarray((values - mean) / deviation, dtype=np.float32)
+
+
+def _extract_local_features(
+    image: NDArray[np.uint8],
+) -> tuple[NDArray[np.float32], NDArray[np.uint8]]:
+    height, width = image.shape[:2]
+    scale = min(1.0, LOCAL_FEATURE_MAX_DIMENSION / max(height, width, 1))
+    if scale < 1.0:
+        processing = cv2.resize(
+            image,
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        processing = image
+
+    enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(processing)
+    detector = cv2.ORB_create(
+        nfeatures=LOCAL_FEATURE_LIMIT,
+        scaleFactor=1.2,
+        nlevels=8,
+        edgeThreshold=15,
+        patchSize=31,
+        fastThreshold=10,
+    )
+    keypoints, descriptors = detector.detectAndCompute(enhanced, None)
+    if descriptors is None or not keypoints:
+        return (
+            np.empty((0, 2), dtype=np.float32),
+            np.empty((0, 32), dtype=np.uint8),
+        )
+
+    ordered_indices = _spatial_keypoint_order(keypoints, processing.shape[1], processing.shape[0])
+    points = np.asarray(
+        [
+            (keypoints[index].pt[0] / scale, keypoints[index].pt[1] / scale)
+            for index in ordered_indices
+        ],
+        dtype=np.float32,
+    )
+    return points, np.ascontiguousarray(descriptors[ordered_indices], dtype=np.uint8)
+
+
+def _spatial_keypoint_order(keypoints: tuple | list, width: int, height: int) -> list[int]:
+    cells: list[list[int]] = [[] for _ in range(LOCAL_FEATURE_GRID_SIZE**2)]
+    strongest_first = sorted(
+        range(len(keypoints)),
+        key=lambda index: (-keypoints[index].response, keypoints[index].pt),
+    )
+    for index in strongest_first:
+        x, y = keypoints[index].pt
+        column = min(LOCAL_FEATURE_GRID_SIZE - 1, int(x * LOCAL_FEATURE_GRID_SIZE / max(width, 1)))
+        row = min(LOCAL_FEATURE_GRID_SIZE - 1, int(y * LOCAL_FEATURE_GRID_SIZE / max(height, 1)))
+        cells[row * LOCAL_FEATURE_GRID_SIZE + column].append(index)
+
+    ordered: list[int] = []
+    offsets = [0] * len(cells)
+    while len(ordered) < len(keypoints):
+        added = False
+        for cell_index, cell in enumerate(cells):
+            offset = offsets[cell_index]
+            if offset >= len(cell):
+                continue
+            ordered.append(cell[offset])
+            offsets[cell_index] += 1
+            added = True
+        if not added:
+            break
+    return ordered
 
 
 def _phash(image: NDArray[np.uint8]) -> int:

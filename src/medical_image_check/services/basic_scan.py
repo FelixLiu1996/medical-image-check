@@ -15,7 +15,7 @@ from medical_image_check.engines.image_exact import (
 from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 
 ProgressCallback = Callable[[int, int, str], None]
-ALGORITHM_VERSION = "generic-image-baseline-1"
+ALGORITHM_VERSION = "generic-image-local-1"
 
 
 class BasicScanService:
