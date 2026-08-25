@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import openpyxl
 import xlrd
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 
 from medical_image_check.domain.models import EvidenceLocation, ScanIssue
 
@@ -40,6 +41,189 @@ class NumericCell:
 class SpreadsheetReadResult:
     cells: tuple[NumericCell, ...]
     issues: tuple[ScanIssue, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SpreadsheetPreview:
+    source_path: str
+    sheet: str
+    start_row: int
+    start_column: int
+    values: tuple[tuple[str, ...], ...]
+    target_min_row: int
+    target_max_row: int
+    target_min_column: int
+    target_max_column: int
+
+    def is_target(self, row: int, column: int) -> bool:
+        return (
+            self.target_min_row <= row <= self.target_max_row
+            and self.target_min_column <= column <= self.target_max_column
+        )
+
+
+def read_spreadsheet_preview(
+    location: EvidenceLocation,
+    *,
+    padding_rows: int = 1,
+    padding_columns: int = 2,
+    maximum_rows: int = 12,
+    maximum_columns: int = 10,
+) -> SpreadsheetPreview:
+    """Read a bounded, display-only window around an evidence location."""
+
+    target = _preview_target(location.coordinate)
+    min_column, min_row, max_column, max_row = target
+    start_row = max(1, min_row - padding_rows)
+    start_column = max(1, min_column - padding_columns)
+    end_row = min(max_row + padding_rows, start_row + maximum_rows - 1)
+    end_column = min(max_column + padding_columns, start_column + maximum_columns - 1)
+    if end_row - start_row + 1 > maximum_rows:
+        end_row = start_row + maximum_rows - 1
+    if end_column - start_column + 1 > maximum_columns:
+        end_column = start_column + maximum_columns - 1
+
+    path = Path(location.source_path)
+    suffix = path.suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        sheet_name, values = _openpyxl_preview(
+            path, location.sheet, start_row, end_row, start_column, end_column
+        )
+    elif suffix == ".xls":
+        sheet_name, values = _xlrd_preview(
+            path, location.sheet, start_row, end_row, start_column, end_column
+        )
+    elif suffix == ".csv":
+        sheet_name, values = _csv_preview(path, start_row, end_row, start_column, end_column)
+    else:
+        raise ValueError(f"不支持预览的表格格式：{path.suffix or '无扩展名'}")
+    return SpreadsheetPreview(
+        source_path=str(path),
+        sheet=sheet_name,
+        start_row=start_row,
+        start_column=start_column,
+        values=values,
+        target_min_row=min_row,
+        target_max_row=max_row,
+        target_min_column=min_column,
+        target_max_column=max_column,
+    )
+
+
+def _preview_target(coordinate: str | None) -> tuple[int, int, int, int]:
+    text = (coordinate or "").strip()
+    row_match = re.fullmatch(r"第\s*(\d+)\s*行", text)
+    if row_match:
+        row = int(row_match.group(1))
+        return 1, row, 10, row
+    try:
+        return range_boundaries(text)
+    except ValueError as exc:
+        raise ValueError(f"无法解析单元格位置：{text or '-'}") from exc
+
+
+def _openpyxl_preview(
+    path: Path,
+    requested_sheet: str | None,
+    start_row: int,
+    end_row: int,
+    start_column: int,
+    end_column: int,
+) -> tuple[str, tuple[tuple[str, ...], ...]]:
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True, keep_links=False)
+    try:
+        sheet = (
+            workbook[requested_sheet]
+            if requested_sheet in workbook.sheetnames
+            else workbook.worksheets[0]
+        )
+        rows = tuple(
+            tuple(_preview_text(cell.value) for cell in row)
+            for row in sheet.iter_rows(
+                min_row=start_row,
+                max_row=end_row,
+                min_col=start_column,
+                max_col=end_column,
+            )
+        )
+        return sheet.title, rows
+    finally:
+        workbook.close()
+
+
+def _xlrd_preview(
+    path: Path,
+    requested_sheet: str | None,
+    start_row: int,
+    end_row: int,
+    start_column: int,
+    end_column: int,
+) -> tuple[str, tuple[tuple[str, ...], ...]]:
+    workbook = xlrd.open_workbook(path, on_demand=True)
+    try:
+        sheet = (
+            workbook.sheet_by_name(requested_sheet)
+            if requested_sheet in workbook.sheet_names()
+            else workbook.sheet_by_index(0)
+        )
+        rows = tuple(
+            tuple(
+                _preview_text(sheet.cell_value(row - 1, column - 1))
+                if row <= sheet.nrows and column <= sheet.ncols
+                else ""
+                for column in range(start_column, end_column + 1)
+            )
+            for row in range(start_row, end_row + 1)
+        )
+        return sheet.name, rows
+    finally:
+        workbook.release_resources()
+
+
+def _csv_preview(
+    path: Path,
+    start_row: int,
+    end_row: int,
+    start_column: int,
+    end_column: int,
+) -> tuple[str, tuple[tuple[str, ...], ...]]:
+    text: str | None = None
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            text = path.read_text(encoding=encoding)
+            break
+        except UnicodeError:
+            continue
+    if text is None:
+        raise ValueError("无法识别 CSV 编码")
+    try:
+        dialect = csv.Sniffer().sniff(text[:8192])
+    except csv.Error:
+        dialect = csv.excel
+    selected: list[tuple[str, ...]] = []
+    for row_index, row in enumerate(csv.reader(text.splitlines(), dialect), start=1):
+        if row_index < start_row:
+            continue
+        if row_index > end_row:
+            break
+        selected.append(
+            tuple(
+                row[column - 1] if column <= len(row) else ""
+                for column in range(start_column, end_column + 1)
+            )
+        )
+    width = end_column - start_column + 1
+    while len(selected) < end_row - start_row + 1:
+        selected.append(tuple("" for _ in range(width)))
+    return "CSV", tuple(selected)
+
+
+def _preview_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (date, datetime, time)):
+        return value.isoformat()
+    return str(value)
 
 
 def canonical_numeric(value: int | float | Decimal) -> str:

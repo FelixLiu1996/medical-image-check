@@ -96,6 +96,7 @@ class FluorescenceDuplicateDetector:
         self,
         path: str | Path,
         pages: tuple[NDArray, ...],
+        force: bool = False,
     ) -> tuple[FluorescencePage, ...]:
         source = str(Path(path))
         page_count = len(pages)
@@ -103,7 +104,7 @@ class FluorescenceDuplicateDetector:
         field_key = _field_key(Path(path))
         extracted: list[FluorescencePage] = []
         for page_number, page in enumerate(pages, start=1):
-            candidate = _extract_page(source, page_number, page_count, page, role, field_key)
+            candidate = _extract_page(source, page_number, page_count, page, role, field_key, force)
             if candidate is not None:
                 extracted.append(candidate)
         return tuple(extracted)
@@ -155,6 +156,7 @@ def _extract_page(
     image: NDArray,
     inferred_role: str,
     field_key: str,
+    force: bool = False,
 ) -> FluorescencePage | None:
     canonical = canonical_pixels(image)
     bgr = canonical[:, :, :3]
@@ -171,7 +173,7 @@ def _extract_page(
 
     colorful = _is_color_fluorescence(bgr)
     named = inferred_role != "unknown"
-    if not named and not colorful:
+    if not force and not named and not colorful:
         return None
 
     planes = {"blue": bgr[:, :, 0], "green": bgr[:, :, 1], "red": bgr[:, :, 2]}

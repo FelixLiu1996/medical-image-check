@@ -30,6 +30,7 @@ REVIEW_LABELS = {
 }
 EVIDENCE_KIND_LABELS = {
     "western_blot": "Western blot",
+    "dot_blot": "Dot blot",
     "fluorescence": "荧光",
     "pathology": "病理",
 }

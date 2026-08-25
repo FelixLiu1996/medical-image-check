@@ -80,6 +80,7 @@ def test_html_report_is_single_file_with_search_and_embedded_evidence(tmp_path: 
     assert "data:image/png;base64," in content
     assert 'id="search"' in content
     assert "filterRows" in content
+    assert "图片内容类型 自动识别（推荐）" in content
     assert "Excel 相对容差 0.0%" in content
     assert "连续风险阈值 3/4" in content
     assert "https://" not in content

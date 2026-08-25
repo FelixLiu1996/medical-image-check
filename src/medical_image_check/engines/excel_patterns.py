@@ -117,8 +117,6 @@ def _find_cell_operations(
         *,
         symmetric: bool,
     ) -> None:
-        if len(findings) >= MAX_FINDINGS_PER_RULE:
-            return
         if first_key == second_key and len(grouped[first_key]) < 2:
             return
         first_value = values[first_key]
@@ -170,8 +168,6 @@ def _find_cell_operations(
         if checkpoint and target_index % 4 == 0:
             checkpoint()
         for first_index, first_key in enumerate(ordered):
-            if len(findings) >= MAX_FINDINGS_PER_RULE:
-                return findings
             first_value = values[first_key]
             for operation, expected, symmetric in (
                 ("add", target - first_value, True),
@@ -201,7 +197,7 @@ def _find_cell_operations(
                     )
             if first_index % 512 == 0 and checkpoint:
                 checkpoint()
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _nearest_value_key(expected: Decimal, ordered_values: list[tuple[Decimal, str]]) -> str | None:
@@ -307,6 +303,8 @@ def _find_exact_series_fragments(
         second = series[second_index]
         first_cells = first.cells[first_begin : first_begin + length]
         second_cells = second.cells[second_begin : second_begin + length]
+        if not _is_informative_cells(first_cells):
+            continue
         locations = (
             _series_range_location(first, first_cells),
             _series_range_location(second, second_cells),
@@ -342,9 +340,7 @@ def _find_exact_series_fragments(
                 },
             )
         )
-        if len(findings) >= MAX_FINDINGS_PER_RULE:
-            break
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _ranges_overlap(first_start: int, second_start: int, length: int) -> bool:
@@ -358,6 +354,8 @@ def _find_shuffled_series(
 ) -> list[Finding]:
     buckets: dict[tuple[int, tuple[str, ...]], list[_Series]] = defaultdict(list)
     for item in series:
+        if not _is_informative_values(item.values):
+            continue
         signature = (len(item.cells), tuple(sorted(cell.canonical_value for cell in item.cells)))
         if len(buckets[signature]) < MAX_GROUPS_PER_BUCKET:
             buckets[signature].append(item)
@@ -396,9 +394,7 @@ def _find_shuffled_series(
                     },
                 )
             )
-            if len(findings) >= MAX_FINDINGS_PER_RULE:
-                return findings
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _pair_by_value(first: _Series, second: _Series) -> list[dict[str, object]]:
@@ -430,6 +426,8 @@ def _find_near_duplicate_series(
             checkpoint()
         length = len(first.cells)
         if length < MINIMUM_NEAR_DUPLICATE_LENGTH:
+            continue
+        if not _is_informative_values(first.values) or not _is_informative_values(second.values):
             continue
         first_values = first.values
         second_values = second.values
@@ -473,9 +471,7 @@ def _find_near_duplicate_series(
                 },
             )
         )
-        if len(findings) >= MAX_FINDINGS_PER_RULE:
-            break
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _find_robust_linear_series(
@@ -488,6 +484,8 @@ def _find_robust_linear_series(
         if checkpoint and pair_index % 128 == 0:
             checkpoint()
         if len(first.cells) < 4:
+            continue
+        if not _is_informative_values(first.values) or not _is_informative_values(second.values):
             continue
         fitted = _theil_sen(first.values, second.values, settings)
         if fitted is None:
@@ -525,9 +523,7 @@ def _find_robust_linear_series(
                 },
             )
         )
-        if len(findings) >= MAX_FINDINGS_PER_RULE:
-            break
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _theil_sen(
@@ -573,7 +569,7 @@ def _find_exact_regions(
             checkpoint()
         for row, column in sorted(grid):
             region = _region_values(grid, row, column, 2, 2)
-            if region and len(set(region)) > 1 and set(region) != {"0", "1"}:
+            if region and _is_informative_canonical_values(region):
                 signatures[tuple(region)].append((source, sheet, row, column))
 
     candidates: list[
@@ -606,6 +602,9 @@ def _find_exact_regions(
             sheets[first[:2]], sheets[second[:2]], first[2:], second[2:], height, width
         )
         area = height * width
+        region_values = _region_values(sheets[first[:2]], first[2], first[3], height, width)
+        if region_values is None or not _is_informative_canonical_values(region_values):
+            continue
         findings.append(
             Finding(
                 deterministic_finding_id(REGION_EXACT_RULE_ID, locations),
@@ -627,9 +626,7 @@ def _find_exact_regions(
                 },
             )
         )
-        if len(findings) >= MAX_FINDINGS_PER_RULE:
-            break
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _region_values(
@@ -812,6 +809,8 @@ def _find_statistical_similarity(
             checkpoint()
         if len(first.cells) < MINIMUM_STATISTICS_LENGTH:
             continue
+        if not _is_informative_values(first.values) or not _is_informative_values(second.values):
+            continue
         first_values = _finite_floats(first.values)
         second_values = _finite_floats(second.values)
         if first_values is None or second_values is None:
@@ -870,9 +869,7 @@ def _find_statistical_similarity(
                 },
             )
         )
-        if len(findings) >= MAX_FINDINGS_PER_RULE:
-            break
-    return findings
+    return _select_diverse_findings(findings)
 
 
 def _candidate_series_pairs(series: list[_Series]) -> list[tuple[_Series, _Series]]:
@@ -892,6 +889,60 @@ def _candidate_series_pairs(series: list[_Series]) -> list[tuple[_Series, _Serie
         for candidates in fingerprints.values():
             pairs.extend(combinations(candidates, 2))
     return pairs
+
+
+def _select_diverse_findings(
+    findings: list[Finding],
+    limit: int = MAX_FINDINGS_PER_RULE,
+    max_per_scope: int = 6,
+) -> list[Finding]:
+    """Keep the strongest clues without allowing early sheets to consume the cap."""
+
+    ordered = sorted(
+        findings,
+        key=lambda item: (
+            {RiskLevel.HIGH: 0, RiskLevel.MEDIUM: 1, RiskLevel.LOW: 2}[item.risk],
+            -int(item.details.get("matched_count", 0)),
+            -_finding_distinct_value_count(item),
+            -item.confidence,
+            item.finding_id,
+        ),
+    )
+    selected: list[Finding] = []
+    per_scope: Counter[tuple[str, str]] = Counter()
+    for finding in ordered:
+        scopes = {(location.source_path, location.sheet or "") for location in finding.locations}
+        if scopes and all(per_scope[scope] >= max_per_scope for scope in scopes):
+            continue
+        selected.append(finding)
+        per_scope.update(scopes)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _finding_distinct_value_count(finding: Finding) -> int:
+    values: set[str] = set()
+    for pair in finding.details.get("paired_values", []):
+        if not isinstance(pair, dict):
+            continue
+        for key in ("first_value", "second_value"):
+            value = pair.get(key)
+            if value is not None:
+                values.add(str(value))
+    return len(values)
+
+
+def _is_informative_cells(cells: tuple[NumericCell, ...]) -> bool:
+    return _is_informative_canonical_values([cell.canonical_value for cell in cells])
+
+
+def _is_informative_values(values: tuple[Decimal, ...]) -> bool:
+    return len(values) >= 2 and len(set(values)) >= 2 and any(value != 0 for value in values)
+
+
+def _is_informative_canonical_values(values: list[str] | tuple[str, ...]) -> bool:
+    return len(values) >= 2 and len(set(values)) >= 2 and any(value != "0" for value in values)
 
 
 def _coarse_fingerprint(values: tuple[Decimal, ...]) -> tuple[int, ...] | None:

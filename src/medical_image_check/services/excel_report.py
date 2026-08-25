@@ -9,6 +9,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from medical_image_check import __version__
+from medical_image_check.domain.image_settings import IMAGE_ANALYSIS_MODE_LABELS, ImageAnalysisMode
 from medical_image_check.domain.models import RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
 from medical_image_check.services.report_common import (
@@ -61,6 +62,12 @@ class ExcelReportExporter:
             ("项目名称", project.name if project else "未关联项目"),
             ("项目 ID", project.project_id if project else ""),
             ("连续数字片段最短位数", project.minimum_digit_run if project else ""),
+            (
+                "图片内容类型",
+                IMAGE_ANALYSIS_MODE_LABELS[ImageAnalysisMode(project.image_analysis_mode)]
+                if project
+                else "",
+            ),
             (
                 "Western blot 单条带检测",
                 "启用" if project and project.western_single_band_enabled else "关闭",
@@ -175,13 +182,25 @@ class ExcelReportExporter:
                 "估算尺度比",
                 "组织占比 1",
                 "组织占比 2",
+                "斑点数 1",
+                "斑点数 2",
+                "匹配斑点数",
+                "斑点排列相似度",
+                "斑点强度/形态轮廓相似度",
+                "归一化排列误差",
             ]
         )
         for finding in result.findings:
             evidence_kind = finding.details.get("evidence_kind")
             if not (
                 finding.rule_id.startswith("image.western_blot.")
-                or evidence_kind in {"western_blot", "fluorescence", "pathology"}
+                or evidence_kind
+                in {
+                    "western_blot",
+                    "dot_blot",
+                    "fluorescence",
+                    "pathology",
+                }
             ):
                 continue
             details = finding.details
@@ -234,6 +253,12 @@ class ExcelReportExporter:
                     details.get("estimated_scale_ratio", ""),
                     details.get("first_tissue_fraction", ""),
                     details.get("second_tissue_fraction", ""),
+                    details.get("first_spot_count", ""),
+                    details.get("second_spot_count", ""),
+                    details.get("matched_spot_count", ""),
+                    details.get("layout_similarity", ""),
+                    details.get("profile_similarity", ""),
+                    details.get("layout_error", ""),
                 ]
             )
         worksheet.freeze_panes = "A2"
@@ -269,6 +294,12 @@ class ExcelReportExporter:
                 14,
                 14,
                 14,
+                12,
+                12,
+                14,
+                18,
+                18,
+                24,
             ),
         )
 

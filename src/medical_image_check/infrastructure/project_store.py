@@ -11,6 +11,7 @@ from medical_image_check.domain.excel_settings import (
     ExcelAnalysisSettings,
     decimal_text,
 )
+from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import (
     EvidenceLocation,
     Finding,
@@ -54,6 +55,12 @@ class ProjectStore:
         western_single_band_enabled = payload.get("western_single_band_enabled", False)
         if not isinstance(western_single_band_enabled, bool):
             raise ValueError("项目文件中的 western_single_band_enabled 必须为布尔值")
+        try:
+            image_analysis_mode = ImageAnalysisMode(
+                payload.get("image_analysis_mode", ImageAnalysisMode.AUTO)
+            ).value
+        except ValueError as exc:
+            raise ValueError("项目文件中的 image_analysis_mode 无效") from exc
         excel_payload = payload.get("excel_analysis_settings", {})
         if not isinstance(excel_payload, dict):
             raise ValueError("项目文件中的 excel_analysis_settings 无效")
@@ -76,6 +83,7 @@ class ProjectStore:
             source_paths=tuple(str(item) for item in source_paths),
             minimum_digit_run=minimum_digit_run,
             western_single_band_enabled=western_single_band_enabled,
+            image_analysis_mode=image_analysis_mode,
             excel_custom_relative_tolerance_percent=float(
                 excel_settings.custom_relative_tolerance_percent
             ),
@@ -101,6 +109,7 @@ def _project_to_dict(project: Project) -> dict[str, object]:
         "source_paths": list(project.source_paths),
         "minimum_digit_run": project.minimum_digit_run,
         "western_single_band_enabled": project.western_single_band_enabled,
+        "image_analysis_mode": project.image_analysis_mode,
         "excel_analysis_settings": {
             "custom_relative_tolerance_percent": (project.excel_custom_relative_tolerance_percent),
             "absolute_tolerance": project.excel_absolute_tolerance,

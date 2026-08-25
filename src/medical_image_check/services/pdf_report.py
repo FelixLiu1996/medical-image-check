@@ -28,6 +28,7 @@ from reportlab.platypus import (
 )
 
 from medical_image_check import __version__
+from medical_image_check.domain.image_settings import IMAGE_ANALYSIS_MODE_LABELS, ImageAnalysisMode
 from medical_image_check.domain.models import RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
 from medical_image_check.services.report_common import (
@@ -247,8 +248,18 @@ def _overview_table(result: ScanResult, project: Project | None, styles) -> Tabl
         [
             "Excel 运算目标",
             ", ".join(project.excel_operation_targets) if project else "-",
+            "图片内容类型",
+            (
+                IMAGE_ANALYSIS_MODE_LABELS[ImageAnalysisMode(project.image_analysis_mode)]
+                if project
+                else "-"
+            ),
+        ],
+        [
             "Western 单条带",
             "启用" if project and project.western_single_band_enabled else "关闭",
+            "",
+            "",
         ],
     ]
     formatted = [[Paragraph(escape(str(cell)), styles["Small"]) for cell in row] for row in rows]

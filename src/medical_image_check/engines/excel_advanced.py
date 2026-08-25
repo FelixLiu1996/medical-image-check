@@ -36,6 +36,7 @@ APPROXIMATE_BANDS = (
 )
 MINIMUM_SERIES_LENGTH = 3
 ALL_PAIRS_SERIES_LIMIT = 250
+MAX_APPROXIMATE_FINDINGS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +175,15 @@ def _find_approximate_values(
                 },
             )
         )
-    return findings
+    findings.sort(
+        key=lambda item: (
+            float(item.details["relative_error"]),
+            -int(item.details["distinct_value_count"]),
+            -int(item.details["cell_count"]),
+            item.finding_id,
+        )
+    )
+    return findings[:MAX_APPROXIMATE_FINDINGS]
 
 
 def _anchored_clusters(
@@ -305,6 +314,8 @@ def _compare_series(
     second_values = second.values
     if len(first_values) != len(second_values):
         return []
+    if not _is_informative_series(first_values) or not _is_informative_series(second_values):
+        return []
 
     relations: list[tuple[str, str, str, Decimal, tuple[Decimal, ...]]] = []
     series_exact = all(
@@ -366,7 +377,7 @@ def _compare_series(
         for first_value, second_value in zip(first_values, second_values, strict=True)
     )
     product_target = settings.target_for(products)
-    if product_target is not None:
+    if product_target is not None and product_target != 0:
         relations.append(
             (
                 SERIES_PRODUCT_RULE_ID,
@@ -411,6 +422,17 @@ def _compare_series(
             )
 
     return [_series_finding(first, second, *relation, settings) for relation in relations]
+
+
+def _is_informative_series(values: tuple[Decimal, ...]) -> bool:
+    """Reject constant and all-zero/identity sequences before relation mining.
+
+    A varied sequence may legitimately contain zero or one, so those values are
+    not removed individually. The gate only rejects columns that cannot carry a
+    meaningful positional pattern.
+    """
+
+    return len(values) >= 2 and len(set(values)) >= 2 and any(value != 0 for value in values)
 
 
 def _constant_scale(

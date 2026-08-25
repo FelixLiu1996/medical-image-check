@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from openpyxl import Workbook
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
@@ -70,6 +72,8 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     window._append_sources([str(source)])
     window._digit_run_spin.setValue(6)
     window._western_single_band_check.setChecked(True)
+    dot_blot_index = window._image_analysis_mode_combo.findData("dot_blot")
+    window._image_analysis_mode_combo.setCurrentIndex(dot_blot_index)
     window._excel_relative_tolerance_spin.setValue(0.25)
     window._excel_absolute_tolerance_edit.setText("1e-9")
     window._excel_operation_targets_edit.setText("0, 1, 50, 100")
@@ -92,6 +96,8 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     assert restored._digit_run_spin.value() == 6
     assert restored._project.western_single_band_enabled is True
     assert restored._western_single_band_check.isChecked()
+    assert restored._project.image_analysis_mode == "dot_blot"
+    assert restored._image_analysis_mode_combo.currentData() == "dot_blot"
     assert restored._project.excel_custom_relative_tolerance_percent == 0.25
     assert restored._excel_absolute_tolerance_edit.text() == "0.000000001"
     assert restored._project.excel_operation_targets == ("0", "1", "50", "100")
@@ -172,7 +178,11 @@ def test_main_window_displays_local_geometric_evidence(tmp_path: Path) -> None:
 def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     workbook = tmp_path / "values.xlsx"
-    workbook.write_bytes(b"test-placeholder")
+    source_book = Workbook()
+    source_book.active.title = "Sheet1"
+    source_book.active.append([1123456, "对照"])
+    source_book.active.append([9123457, "实验"])
+    source_book.save(workbook)
     finding = Finding(
         finding_id="excel-fragment",
         rule_id="excel.digit_fragment",
@@ -217,6 +227,12 @@ def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> N
     assert "匹配数字片段：12345" in summary
     assert "完整值 1123456" in summary
     assert window._evidence_images_container.isHidden()
+    assert not window._spreadsheet_evidence_container.isHidden()
+    assert window._first_spreadsheet_evidence._table.item(0, 0).text() == "1123456"
+    assert window._first_spreadsheet_evidence._table.item(0, 0).background().color() == QColor(
+        "#fff1a8"
+    )
+    assert window._result_evidence_splitter.orientation() == Qt.Orientation.Vertical
 
     window.close()
     app.processEvents()

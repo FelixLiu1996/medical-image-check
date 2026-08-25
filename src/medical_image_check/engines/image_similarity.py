@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import (
     EvidenceLocation,
     Finding,
@@ -20,6 +22,7 @@ from medical_image_check.domain.models import (
     ScanIssue,
     deterministic_finding_id,
 )
+from medical_image_check.engines.dot_blot import DotBlotDuplicateDetector, DotBlotRegion
 from medical_image_check.engines.fluorescence import (
     FluorescenceDuplicateDetector,
     FluorescencePage,
@@ -35,6 +38,7 @@ from medical_image_check.engines.western_blot import (
 from medical_image_check.infrastructure.images import (
     ImageFeature,
     apply_transform,
+    canonical_pixels,
     decode_image_pages,
     extract_image_features_from_pages,
     hamming_distance,
@@ -48,7 +52,13 @@ class ImageDuplicateDetector:
     perceptual_rule_id = "image.global.perceptual"
     local_rule_id = "image.local.geometric"
 
-    def __init__(self, western_single_band_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        western_single_band_enabled: bool = False,
+        analysis_mode: ImageAnalysisMode | str = ImageAnalysisMode.AUTO,
+    ) -> None:
+        self.analysis_mode = ImageAnalysisMode(analysis_mode)
+        self._dot_blot_detector = DotBlotDuplicateDetector()
         self._fluorescence_detector = FluorescenceDuplicateDetector()
         self._pathology_detector = PathologyDuplicateDetector()
         self._western_detector = WesternBlotDuplicateDetector(western_single_band_enabled)
@@ -64,6 +74,7 @@ class ImageDuplicateDetector:
         fluorescence_pages: list[FluorescencePage] = []
         pathology_regions: list[PathologyRegion] = []
         western_regions: list[WesternRegion] = []
+        dot_blot_regions: list[DotBlotRegion] = []
         issues: list[ScanIssue] = []
 
         for path in paths:
@@ -75,11 +86,38 @@ class ImageDuplicateDetector:
                 extracted = extract_image_features_from_pages(path, pages)
                 file_hashes[sha256(data).hexdigest()].append(path)
                 features.extend(extracted)
-                fluorescence_pages.extend(
-                    self._fluorescence_detector.extract_from_pages(path, pages)
-                )
-                pathology_regions.extend(self._pathology_detector.extract_from_pages(path, pages))
-                western_regions.extend(self._western_detector.extract_from_pages(path, pages))
+                if self.analysis_mode in {
+                    ImageAnalysisMode.AUTO,
+                    ImageAnalysisMode.DOT_BLOT,
+                }:
+                    dot_blot_regions.extend(self._dot_blot_detector.extract_from_pages(path, pages))
+                if self.analysis_mode in {
+                    ImageAnalysisMode.AUTO,
+                    ImageAnalysisMode.FLUORESCENCE,
+                }:
+                    fluorescence_pages.extend(
+                        self._fluorescence_detector.extract_from_pages(
+                            path,
+                            pages,
+                            force=self.analysis_mode == ImageAnalysisMode.FLUORESCENCE,
+                        )
+                    )
+                if self.analysis_mode in {
+                    ImageAnalysisMode.AUTO,
+                    ImageAnalysisMode.PATHOLOGY,
+                }:
+                    pathology_regions.extend(
+                        self._pathology_detector.extract_from_pages(
+                            path,
+                            pages,
+                            force=self.analysis_mode == ImageAnalysisMode.PATHOLOGY,
+                        )
+                    )
+                if self.analysis_mode == ImageAnalysisMode.WESTERN_BLOT or (
+                    self.analysis_mode == ImageAnalysisMode.AUTO
+                    and _looks_like_western_input(path, pages)
+                ):
+                    western_regions.extend(self._western_detector.extract_from_pages(path, pages))
             except (OSError, ValueError) as exc:
                 issues.append(ScanIssue(str(path), f"无法处理图片：{exc}", "error"))
             finally:
@@ -102,6 +140,13 @@ class ImageDuplicateDetector:
         exact_pairs.update(perceptual_pairs)
         findings.extend(self._local_findings(features, exact_pairs, checkpoint))
         findings.extend(
+            self._dot_blot_detector.findings(
+                dot_blot_regions,
+                source_duplicate_pairs,
+                checkpoint,
+            )
+        )
+        findings.extend(
             self._fluorescence_detector.findings(
                 fluorescence_pages,
                 source_duplicate_pairs,
@@ -122,6 +167,28 @@ class ImageDuplicateDetector:
                 checkpoint,
             )
         )
+        specialist_pairs = {
+            pair
+            for finding in findings
+            if finding.rule_id.startswith(
+                (
+                    "image.dot_blot.",
+                    "image.western_blot.",
+                    "image.fluorescence.",
+                    "image.pathology.",
+                )
+            )
+            for pair in (_finding_page_pair(finding),)
+            if pair is not None
+        }
+        findings = [
+            finding
+            for finding in findings
+            if not (
+                finding.rule_id in {self.perceptual_rule_id, self.local_rule_id}
+                and _finding_page_pair(finding) in specialist_pairs
+            )
+        ]
         return findings, issues
 
     def _file_findings(
@@ -323,6 +390,28 @@ class _ModelEstimate:
 class _GeometricMatch:
     confidence: float
     details: dict[str, str | int | float]
+
+
+def _looks_like_western_input(path: Path, pages: tuple[NDArray, ...]) -> bool:
+    stem = path.stem.lower()
+    if "western" in stem or "免疫印迹" in stem or "蛋白印迹" in stem:
+        return True
+    colorfulness: list[float] = []
+    for page in pages:
+        bgr = canonical_pixels(page)[:, :, :3].astype(np.float32)
+        colorfulness.append(float(np.mean(np.max(bgr, axis=2) - np.min(bgr, axis=2))))
+    return bool(colorfulness) and float(np.median(colorfulness)) <= 6.0
+
+
+def _finding_page_pair(finding: Finding) -> tuple[str, str] | None:
+    if len(finding.locations) != 2:
+        return None
+    keys: list[str] = []
+    for location in finding.locations:
+        match = re.search(r"第\s*(\d+)\s*页", location.coordinate or "")
+        page = int(match.group(1)) if match else 1
+        keys.append(f"{location.source_path}#{page}")
+    return tuple(sorted(keys))
 
 
 def _local_candidate_pairs(

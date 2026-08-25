@@ -257,3 +257,44 @@ def test_detector_marks_matching_mean_and_standard_deviation(tmp_path: Path) -> 
     assert statistics.details["summary_match"] is True
     assert statistics.details["first_mean"] == 0
     assert statistics.details["first_standard_deviation"] == 1
+
+
+def test_detector_suppresses_zero_product_and_constant_sequence_noise(tmp_path: Path) -> None:
+    path = tmp_path / "zero-noise.xlsx"
+    _save_columns(path, [0, 2, 0, 3], [4, 0, 5, 0])
+
+    findings, issues = ExactExcelDuplicateDetector().scan([path])
+
+    assert issues == []
+    assert not any(
+        item.rule_id == "excel.series.target_product" and item.details["parameter"] == "0"
+        for item in findings
+    )
+
+
+def test_batch_selection_keeps_late_sheet_exact_fragment(tmp_path: Path) -> None:
+    path = tmp_path / "many-candidates.xlsx"
+    workbook = Workbook()
+    noise = workbook.active
+    noise.title = "早期噪声"
+    for column in range(1, 29):
+        values = (10_000 + column, 11, 22, 33, 44, 20_000 + column)
+        for row, value in enumerate(values, start=1):
+            noise.cell(row, column, value)
+    positive = workbook.create_sheet("晚期阳性")
+    positive.cell(3, 4, 9.1)
+    positive.cell(3, 7, 8.2)
+    for row, value in enumerate((1.194333, 1.046568, 1.14536, 1.314954), start=4):
+        positive.cell(row, 4, value)
+        positive.cell(row, 7, value)
+    positive.cell(8, 4, 7.3)
+    positive.cell(8, 7, 6.4)
+    workbook.save(path)
+
+    findings, _ = ExactExcelDuplicateDetector().scan([path])
+
+    assert any(
+        item.rule_id == "excel.series.fragment_exact"
+        and {location.coordinate for location in item.locations} == {"D4:D7", "G4:G7"}
+        for item in findings
+    )

@@ -79,6 +79,45 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
     assert source.read_bytes() == b"unchanged-source"
 
 
+def test_excel_report_contains_structured_dot_blot_evidence(tmp_path: Path) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    finding = Finding(
+        finding_id="dot-1",
+        rule_id="image.dot_blot.spot_array_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="Dot blot 斑点阵列疑似复用",
+        description="斑点排列一致。",
+        locations=(EvidenceLocation(str(first)), EvidenceLocation(str(second))),
+        details={
+            "evidence_kind": "dot_blot",
+            "first_spot_count": 4,
+            "second_spot_count": 4,
+            "matched_spot_count": 4,
+            "layout_similarity": 0.98,
+            "profile_similarity": 0.86,
+            "layout_error": 0.02,
+        },
+    )
+
+    output = ExcelReportExporter().export(
+        ScanResult(2, 2, 0, (finding,)), tmp_path / "dot-report.xlsx"
+    )
+    workbook = load_workbook(output, read_only=True)
+    evidence = workbook["图像证据"]
+
+    assert evidence["A2"].value == "dot-1"
+    assert evidence["R2"].value == "Dot blot"
+    assert evidence["AC2"].value == 4
+    assert evidence["AD2"].value == 4
+    assert evidence["AE2"].value == 4
+    assert evidence["AF2"].value == 0.98
+    assert evidence["AG2"].value == 0.86
+    assert evidence["AH2"].value == 0.02
+    workbook.close()
+
+
 def test_excel_report_contains_structured_western_blot_evidence(tmp_path: Path) -> None:
     first = tmp_path / "first.png"
     second = tmp_path / "second.png"

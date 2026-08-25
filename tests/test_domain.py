@@ -145,6 +145,18 @@ def test_project_western_single_band_setting_persists_and_invalidates_scan(
     assert loaded.western_single_band_enabled is True
 
 
+def test_project_image_analysis_mode_persists_and_invalidates_scan(tmp_path: Path) -> None:
+    project = Project.create("图片类型").with_scan_result(ScanResult(0, 0, 0, ()))
+
+    changed = project.with_image_analysis_mode("dot_blot")
+    destination = tmp_path / "image-mode.mic-project.json"
+    ProjectStore().save(changed, destination)
+    loaded = ProjectStore().load(destination)
+
+    assert changed.last_scan_result is None
+    assert loaded.image_analysis_mode == "dot_blot"
+
+
 def test_project_store_migrates_schema_version_three_western_setting(
     tmp_path: Path,
 ) -> None:

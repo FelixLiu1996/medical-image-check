@@ -1,10 +1,10 @@
 # 跨窗口交接
 
-最后更新：2026-08-25
+最后更新：2026-08-26
 
 ## 当前目标
 
-优先收集、复现并修复用户在 Windows Alpha 实际体验中发现的问题。轻量算法反馈标记已经确认方向，但暂缓开发，不得先于已报告的可用性问题。
+首轮 Windows Alpha 反馈中的 Excel 噪声/证据可读性和 Dot blot 漏检/专项串类问题已完成本地修复，当前目标是推送分支并通过远程 Windows/Linux CI 与 portable 验证。轻量算法反馈标记已经确认方向，但继续暂缓开发。
 
 ## 当前状态
 
@@ -14,7 +14,7 @@
 - `codex/v0.1-foundation` 已快进合并到 `main`，并创建标签 `v0.1.0-alpha.9`；当前修复分支为 `codex/alpha-feedback-fixes`。
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
 - 已实现项目 UI 生命周期、扫描结果持久化、三种本地报告、图片文件/解码像素重复、整体感知近似、局部几何重叠、Western/荧光/病理专项，以及 Excel 精确/片段/近似/运算/结构/稳健线性/统计规则和 CI。
-- 项目清单已升级为 schema 5，并兼容读取 schema 1/2/3/4；保存连续数字片段、Western blot 单条带开关及 Excel 容差、运算目标和连续风险阈值。
+- 项目清单已升级为 schema 6，并兼容读取 schema 1–5；保存图片内容类型、连续数字片段、Western blot 单条带开关及 Excel 容差、运算目标和连续风险阈值。
 - 已建立 Windows portable 工作流和 ADR-0003，并通过 GitHub Windows runner 构建、冒烟及下载校验。
 - 已实现 Western blot 明暗条带/面板候选、分段索引、结构/几何/背景/掩膜验证、同图 Copy-Move 和可选单条带低风险检测。
 - 已实现荧光通道/合并角色、同视野配准、Merge 成分正常关系和同通道疑似复用基线。
@@ -27,8 +27,11 @@
 - 打包程序 `--smoke-test` 会实际生成并校验 Excel、HTML、PDF 三种临时报告，Windows portable 必须通过该路径。
 - Excel 全局扫描已支持自定义相对/绝对容差、单次与连续四则运算、连续片段、乱序、少量修改、二维区域、Theil–Sen 稳健线性和固定低风险统计提示；GUI、项目恢复和三种报告已贯通参数与证据。
 - GUI 已重构为现代化中文首页、图片查重和数据查重两个独立工作区；直接文件、文件夹内容、参数、结果和证据均按模式隔离，项目保存为可选辅助功能。
-- 扫描服务支持 `all/image/data` 模式，图片或数据工作区会跳过另一套检测器；界面模式不写入项目 schema，旧项目按已有输入和结果自动选择工作区。
-- 本地开发版本为 `0.1.0a9`，扫描算法版本为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`。
+- 扫描服务支持 `all/image/data` 工作区模式，图片或数据工作区会跳过另一套检测器；工作区模式不写入项目 schema，旧项目按已有输入和结果自动选择工作区。
+- 图片内容类型支持 `auto/generic/western_blot/dot_blot/fluorescence/pathology`，自动模式收紧 Western blot/病理准入，明确模式只运行对应专项；通用检测始终运行。
+- 新增 Dot blot 斑点排列专项和结构化证据，能处理裁剪、缩放、灰度/对比度差异；专项结果存在时折叠同图片对的通用候选。
+- Excel 已增加全零/常量/身份运算/零乘积降噪、按证据强度排序以及跨工作簿/工作表公平选取；数据结果支持左右原工作表上下文和命中单元格高亮。
+- 本地开发版本为 `0.1.0a10`，扫描算法版本为 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
 
 ## 已确认的重要方向
 
@@ -58,10 +61,10 @@
 
 ## 下一步
 
-1. 接收用户的 Alpha 体验问题，逐项复现、分级、修复并回归验证。
-2. 在干净 Windows 10/11 实机验证 GUI、暂停/取消、三种报告和 PDF 字体/打印。
-3. 使用授权 Western/荧光/病理及 Excel 正负例校准算法。
-4. 后续再设计自动识别/手动框选、持久化任务断点、历史库和轻量算法反馈。
+1. 推送 `codex/alpha-feedback-fixes`，确认 Windows/Linux CI 和 Windows portable。
+2. 在干净 Windows 10/11 实机验证表格证据区、Dot blot、三种报告和 PDF 字体/打印。
+3. 使用授权 Western/Dot blot/荧光/病理及 Excel 独立正负例校准算法。
+4. 后续再设计自动识别/手动框选、持久化任务断点、历史库、GPU 后端和轻量算法反馈。
 
 ## 验证状态
 
@@ -70,13 +73,15 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：91 项通过，包含图片/数据模式隔离和 GUI 文件类型过滤。
+- `pytest`：97 项通过，包含图片类型路由、Dot blot、Excel 降噪/公平选取和原表高亮预览。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - `0.1.0a9` Qt offscreen 首页、图片和数据工作区截图检查通过；图片页使用可滚动工作区避免低高度窗口挤掉导航。
-- `0.1.0a9` wheel、打包程序三报告冒烟和 `pyside6-deploy --dry-run` 本地通过。
+- `0.1.0a10` wheel、打包程序三报告冒烟、许可证收集和 `pyside6-deploy --dry-run` 本地通过。
+- 4 张真实同源 Dot blot 本地只读回归输出全部 6 组两两关系，未出现 Western blot/病理串类，约 0.53 秒；样例未入库。
+- 13 个真实 Excel 工作簿本地只读回归由修复前 9,864 条降至 1,802 条，零乘积为 0 且已知阳性保留，约 6.31 秒；样例未入库。
 - 双入口 GUI 源码 CI Windows/Linux run `32862204165` 通过；Windows portable run `32862205003` 完成 standalone、打包程序三报告冒烟、许可证收集、ZIP 组装和上传，总耗时 24 分 39 秒，工件 92.3 MB，artifact digest `9507b3b0998fb51cde1e48bdd1da1a880735ffd38a1dbe1583a47652edd7fd23`。
 - Python wheel 构建与源码编译检查：通过。
 - GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32834918247`）。

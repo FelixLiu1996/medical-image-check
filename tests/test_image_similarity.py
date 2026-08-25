@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 
 
@@ -171,3 +172,48 @@ def test_detector_finds_partial_overlap_between_two_crops(tmp_path: Path) -> Non
     assert local[0].details["inlier_count"] >= 8
     assert 0.05 <= local[0].details["first_coverage"] < 0.8
     assert 0.05 <= local[0].details["second_coverage"] < 0.8
+
+
+def _dot_blot_image(width: int = 720, height: int = 160) -> np.ndarray:
+    image = np.full((height, width, 3), 238, dtype=np.uint8)
+    for center, radius, value in zip(
+        ((115, 78), (305, 66), (470, 76), (620, 76)),
+        (46, 15, 44, 49),
+        (60, 195, 25, 10),
+        strict=True,
+    ):
+        cv2.circle(image, center, radius, (value, value, value), -1)
+    return image
+
+
+def test_detector_finds_dot_blot_layout_after_crop_scale_and_contrast(tmp_path: Path) -> None:
+    source_image = _dot_blot_image()
+    transformed = cv2.resize(source_image[:, 45:690], (360, 110), interpolation=cv2.INTER_AREA)
+    transformed = cv2.convertScaleAbs(transformed, alpha=0.55, beta=105)
+    first = tmp_path / "source-dot.png"
+    second = tmp_path / "adjusted-dot.png"
+    assert cv2.imwrite(str(first), source_image)
+    assert cv2.imwrite(str(second), transformed)
+
+    findings, issues = ImageDuplicateDetector().scan([first, second])
+
+    assert issues == []
+    dot = next(item for item in findings if item.rule_id == "image.dot_blot.spot_array_reuse")
+    assert dot.details["matched_spot_count"] >= 3
+    assert dot.details["layout_similarity"] >= 0.8
+    assert dot.details["profile_similarity"] >= 0.65
+    assert not any(item.rule_id.startswith("image.pathology.") for item in findings)
+
+
+def test_generic_image_mode_skips_medical_specialists(tmp_path: Path) -> None:
+    first = tmp_path / "first-dot.png"
+    second = tmp_path / "second-dot.png"
+    image = _dot_blot_image()
+    assert cv2.imwrite(str(first), image)
+    assert cv2.imwrite(str(second), cv2.convertScaleAbs(image, alpha=0.8, beta=25))
+
+    findings, _ = ImageDuplicateDetector(analysis_mode=ImageAnalysisMode.GENERIC).scan(
+        [first, second]
+    )
+
+    assert not any(item.rule_id.startswith("image.dot_blot.") for item in findings)

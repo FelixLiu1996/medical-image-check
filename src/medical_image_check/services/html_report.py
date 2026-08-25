@@ -8,6 +8,7 @@ from html import escape
 from pathlib import Path
 
 from medical_image_check import __version__
+from medical_image_check.domain.image_settings import IMAGE_ANALYSIS_MODE_LABELS, ImageAnalysisMode
 from medical_image_check.domain.models import RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
 from medical_image_check.services.report_common import (
@@ -103,7 +104,9 @@ def _project_parameter_text(project: Project | None) -> str:
     if project is None:
         return "扫描参数：未关联项目"
     return (
-        f"扫描参数：数字片段 {project.minimum_digit_run} 位；"
+        "扫描参数："
+        f"图片内容类型 {IMAGE_ANALYSIS_MODE_LABELS[ImageAnalysisMode(project.image_analysis_mode)]}；"
+        f"数字片段 {project.minimum_digit_run} 位；"
         f"Excel 相对容差 {project.excel_custom_relative_tolerance_percent}%；"
         f"绝对容差 {project.excel_absolute_tolerance}；"
         f"目标 {', '.join(project.excel_operation_targets)}；"

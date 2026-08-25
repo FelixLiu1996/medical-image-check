@@ -13,6 +13,7 @@ from medical_image_check.domain.excel_settings import (
     DEFAULT_EXCEL_OPERATION_TARGETS,
     ExcelAnalysisSettings,
 )
+from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import ScanResult
 from medical_image_check.engines.excel_exact import (
     SUPPORTED_SPREADSHEET_EXTENSIONS,
@@ -25,7 +26,7 @@ from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
-    "generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2"
+    "generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3"
 )
 
 
@@ -79,6 +80,7 @@ class BasicScanService:
         self,
         minimum_digit_run: int = 4,
         western_single_band_enabled: bool = False,
+        image_analysis_mode: ImageAnalysisMode | str = ImageAnalysisMode.AUTO,
         excel_custom_relative_tolerance_percent: str | float = 0,
         excel_absolute_tolerance: str = DEFAULT_EXCEL_ABSOLUTE_TOLERANCE,
         excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS,
@@ -88,7 +90,7 @@ class BasicScanService:
     ) -> None:
         self.scan_mode = ScanMode(scan_mode)
         self._image_detector = (
-            ImageDuplicateDetector(western_single_band_enabled)
+            ImageDuplicateDetector(western_single_band_enabled, image_analysis_mode)
             if self.scan_mode != ScanMode.DATA
             else None
         )
@@ -182,7 +184,12 @@ class BasicScanService:
             progress(completed, total, "正在整理扫描结果")
         findings = [*image_findings, *excel_findings]
         findings.sort(
-            key=lambda item: (item.risk != "high", item.risk != "medium", item.finding_id)
+            key=lambda item: (
+                item.risk != "high",
+                item.risk != "medium",
+                -int(item.details.get("matched_count", item.details.get("matched_spot_count", 0))),
+                item.finding_id,
+            )
         )
         return ScanResult(
             source_count=len(files),

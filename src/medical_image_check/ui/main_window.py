@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -41,11 +43,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from medical_image_check.domain.image_settings import (
+    IMAGE_ANALYSIS_MODE_LABELS,
+    ImageAnalysisMode,
+)
 from medical_image_check.domain.models import EvidenceLocation, Finding, RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
 from medical_image_check.engines.excel_exact import SUPPORTED_SPREADSHEET_EXTENSIONS
 from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
+from medical_image_check.infrastructure.spreadsheets import read_spreadsheet_preview
 from medical_image_check.services.basic_scan import (
     BasicScanService,
     ScanCancelled,
@@ -110,7 +117,7 @@ QPushButton[role="primary"] {
 QPushButton[role="primary"]:hover { background: #2859cc; border-color: #2859cc; }
 QPushButton[role="nav"] { border: 0; background: transparent; font-weight: 600; }
 QPushButton[role="nav"]:checked { background: #e8efff; color: #2457c5; }
-QListWidget, QTableWidget, QLineEdit, QSpinBox, QDoubleSpinBox {
+QListWidget, QTableWidget, QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: #ffffff;
     border: 1px solid #dce3ed;
     border-radius: 7px;
@@ -118,7 +125,7 @@ QListWidget, QTableWidget, QLineEdit, QSpinBox, QDoubleSpinBox {
     selection-color: #172033;
 }
 QListWidget { padding: 6px; }
-QLineEdit, QSpinBox, QDoubleSpinBox { min-height: 30px; padding: 0 6px; }
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: 30px; padding: 0 6px; }
 QHeaderView::section {
     background: #f3f6fb;
     color: #53627a;
@@ -224,6 +231,70 @@ class ImageEvidenceView(QWidget):
             painter.drawRect(evidence_rect)
 
 
+class SpreadsheetEvidenceView(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        self._title = QLabel("请选择一条表格结果")
+        self._title.setStyleSheet("color: #42526b; font-weight: 600;")
+        self._title.setWordWrap(True)
+        self._table = QTableWidget()
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._table.setAlternatingRowColors(True)
+        self._table.setMinimumHeight(220)
+        layout.addWidget(self._title)
+        layout.addWidget(self._table, 1)
+
+    def set_evidence(self, location: EvidenceLocation | None) -> None:
+        self._table.clear()
+        self._table.setRowCount(0)
+        self._table.setColumnCount(0)
+        if location is None:
+            self._title.setText("请选择一条表格结果")
+            return
+        try:
+            preview = read_spreadsheet_preview(location)
+        except Exception as exc:  # noqa: BLE001 - preview failure must not hide scan evidence
+            self._title.setText(f"{Path(location.source_path).name} · 无法读取原表预览")
+            self._table.setRowCount(1)
+            self._table.setColumnCount(1)
+            self._table.setItem(0, 0, QTableWidgetItem(str(exc)))
+            return
+
+        self._title.setText(
+            f"{Path(preview.source_path).name} · {preview.sheet} · {location.coordinate or '-'}"
+        )
+        row_count = len(preview.values)
+        column_count = max((len(row) for row in preview.values), default=0)
+        self._table.setRowCount(row_count)
+        self._table.setColumnCount(column_count)
+        self._table.setVerticalHeaderLabels(
+            [str(preview.start_row + index) for index in range(row_count)]
+        )
+        self._table.setHorizontalHeaderLabels(
+            [_column_label(preview.start_column + index) for index in range(column_count)]
+        )
+        for row_index, row in enumerate(preview.values):
+            for column_index, value in enumerate(row):
+                item = QTableWidgetItem(value)
+                absolute_row = preview.start_row + row_index
+                absolute_column = preview.start_column + column_index
+                if preview.is_target(absolute_row, absolute_column):
+                    item.setBackground(QColor("#fff1a8"))
+                    item.setForeground(QColor("#5a4300"))
+                    item.setToolTip("当前候选命中的原始单元格")
+                self._table.setItem(row_index, column_index, item)
+        self._table.resizeColumnsToContents()
+        for column in range(column_count):
+            self._table.setColumnWidth(column, min(180, max(64, self._table.columnWidth(column))))
+
+    def clear(self) -> None:
+        self.set_evidence(None)
+
+
 class ScanWorker(QObject):
     progress = Signal(int, int, str)
     finished = Signal(object)
@@ -235,6 +306,7 @@ class ScanWorker(QObject):
         sources: list[str],
         minimum_digit_run: int,
         western_single_band_enabled: bool,
+        image_analysis_mode: str,
         excel_custom_relative_tolerance_percent: float,
         excel_absolute_tolerance: str,
         excel_operation_targets: tuple[str, ...],
@@ -246,6 +318,7 @@ class ScanWorker(QObject):
         self._sources = sources
         self._minimum_digit_run = minimum_digit_run
         self._western_single_band_enabled = western_single_band_enabled
+        self._image_analysis_mode = image_analysis_mode
         self._excel_custom_relative_tolerance_percent = excel_custom_relative_tolerance_percent
         self._excel_absolute_tolerance = excel_absolute_tolerance
         self._excel_operation_targets = excel_operation_targets
@@ -260,6 +333,7 @@ class ScanWorker(QObject):
             result = BasicScanService(
                 minimum_digit_run=self._minimum_digit_run,
                 western_single_band_enabled=self._western_single_band_enabled,
+                image_analysis_mode=self._image_analysis_mode,
                 excel_custom_relative_tolerance_percent=(
                     self._excel_custom_relative_tolerance_percent
                 ),
@@ -376,6 +450,9 @@ class MainWindow(QMainWindow):
         self._cancel_button.clicked.connect(self._cancel_scan)
         self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
         self._western_single_band_check.toggled.connect(self._western_settings_changed)
+        self._image_analysis_mode_combo.currentIndexChanged.connect(
+            self._image_analysis_mode_changed
+        )
         self._excel_relative_tolerance_spin.editingFinished.connect(self._excel_settings_changed)
         self._excel_absolute_tolerance_edit.editingFinished.connect(self._excel_settings_changed)
         self._excel_operation_targets_edit.editingFinished.connect(self._excel_settings_changed)
@@ -525,12 +602,20 @@ class MainWindow(QMainWindow):
 
         self._image_settings_group = QGroupBox("图片检测设置")
         image_settings = QHBoxLayout(self._image_settings_group)
+        image_settings.addWidget(QLabel("内容类型："))
+        self._image_analysis_mode_combo = QComboBox()
+        for mode, label in IMAGE_ANALYSIS_MODE_LABELS.items():
+            self._image_analysis_mode_combo.addItem(label, mode.value)
+        self._image_analysis_mode_combo.setToolTip(
+            "自动模式会先判断图像类型再运行专项算法；已知类型时可直接指定，减少串类误报。"
+        )
+        image_settings.addWidget(self._image_analysis_mode_combo)
         self._western_single_band_check = QCheckBox("检测 Western blot 单条带相似")
         self._western_single_band_check.setToolTip(
             "默认关闭；单条带自然相似较常见，启用后只生成低风险人工复核候选。"
         )
         image_settings.addWidget(self._western_single_band_check)
-        image_settings.addWidget(QLabel("默认同时检测通用图片、Western blot、荧光图和普通病理图。"))
+        image_settings.addWidget(QLabel("通用重复检测始终运行；专项算法按所选类型运行。"))
         image_settings.addStretch(1)
         layout.addWidget(self._image_settings_group)
 
@@ -612,6 +697,13 @@ class MainWindow(QMainWindow):
         self._second_evidence = ImageEvidenceView()
         evidence_images.addWidget(self._first_evidence, 1)
         evidence_images.addWidget(self._second_evidence, 1)
+        self._spreadsheet_evidence_container = QWidget()
+        spreadsheet_evidence = QHBoxLayout(self._spreadsheet_evidence_container)
+        spreadsheet_evidence.setContentsMargins(0, 0, 0, 0)
+        self._first_spreadsheet_evidence = SpreadsheetEvidenceView()
+        self._second_spreadsheet_evidence = SpreadsheetEvidenceView()
+        spreadsheet_evidence.addWidget(self._first_spreadsheet_evidence, 1)
+        spreadsheet_evidence.addWidget(self._second_spreadsheet_evidence, 1)
         self._evidence_summary = QLabel("选择一条结果后显示图像或数值证据。")
         self._evidence_summary.setWordWrap(True)
         self._evidence_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -624,13 +716,15 @@ class MainWindow(QMainWindow):
         evidence_actions.addWidget(self._copy_evidence_button)
         evidence_actions.addStretch(1)
         evidence_layout.addWidget(self._evidence_images_container)
+        evidence_layout.addWidget(self._spreadsheet_evidence_container)
         evidence_layout.addWidget(self._evidence_summary)
         evidence_layout.addLayout(evidence_actions)
-        result_evidence_layout = QHBoxLayout()
-        result_evidence_layout.setSpacing(10)
-        result_evidence_layout.addWidget(self._results_group, 3)
-        result_evidence_layout.addWidget(self._evidence_group, 2)
-        layout.addLayout(result_evidence_layout, 1)
+        self._result_evidence_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._result_evidence_splitter.addWidget(self._results_group)
+        self._result_evidence_splitter.addWidget(self._evidence_group)
+        self._result_evidence_splitter.setStretchFactor(0, 3)
+        self._result_evidence_splitter.setStretchFactor(1, 2)
+        layout.addWidget(self._result_evidence_splitter, 1)
         page = QScrollArea()
         page.setFrameShape(QFrame.Shape.NoFrame)
         page.setWidgetResizable(True)
@@ -657,6 +751,9 @@ class MainWindow(QMainWindow):
         self._data_nav_button.setChecked(not is_image)
         self._image_settings_group.setVisible(is_image)
         self._excel_settings_group.setVisible(not is_image)
+        self._result_evidence_splitter.setOrientation(
+            Qt.Orientation.Horizontal if is_image else Qt.Orientation.Vertical
+        )
         if is_image:
             self._mode_title.setText("图片查重")
             self._mode_subtitle.setText(
@@ -798,6 +895,7 @@ class MainWindow(QMainWindow):
         controls = (
             self._digit_run_spin,
             self._western_single_band_check,
+            self._image_analysis_mode_combo,
             self._excel_relative_tolerance_spin,
             self._excel_absolute_tolerance_edit,
             self._excel_operation_targets_edit,
@@ -808,6 +906,8 @@ class MainWindow(QMainWindow):
             control.blockSignals(True)
         self._digit_run_spin.setValue(project.minimum_digit_run)
         self._western_single_band_check.setChecked(project.western_single_band_enabled)
+        mode_index = self._image_analysis_mode_combo.findData(project.image_analysis_mode)
+        self._image_analysis_mode_combo.setCurrentIndex(max(0, mode_index))
         self._excel_relative_tolerance_spin.setValue(
             project.excel_custom_relative_tolerance_percent
         )
@@ -1060,10 +1160,14 @@ class MainWindow(QMainWindow):
         western_single_band_enabled = (
             self._project.western_single_band_enabled if self._project else False
         )
+        image_analysis_mode = (
+            self._project.image_analysis_mode if self._project else ImageAnalysisMode.AUTO.value
+        )
         self._worker = ScanWorker(
             sources,
             minimum_digit_run,
             western_single_band_enabled,
+            image_analysis_mode,
             self._project.excel_custom_relative_tolerance_percent,
             self._project.excel_absolute_tolerance,
             self._project.excel_operation_targets,
@@ -1211,9 +1315,20 @@ class MainWindow(QMainWindow):
         finding = self._rendered_findings[row]
         if finding.rule_id.startswith("excel."):
             self._evidence_images_container.hide()
+            self._spreadsheet_evidence_container.show()
+            self._first_spreadsheet_evidence.set_evidence(
+                finding.locations[0] if finding.locations else None
+            )
+            self._second_spreadsheet_evidence.set_evidence(
+                finding.locations[1] if len(finding.locations) > 1 else None
+            )
             self._evidence_summary.setText(_excel_evidence_summary_text(finding))
             self._crop_evidence_check.setEnabled(False)
             self._copy_evidence_button.setEnabled(True)
+            QTimer.singleShot(
+                0,
+                lambda: self._workspace_page.ensureWidgetVisible(self._evidence_group, 0, 12),
+            )
             return
         if len(finding.locations) < 2 or not all(
             Path(location.source_path).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
@@ -1223,6 +1338,7 @@ class MainWindow(QMainWindow):
             return
 
         self._evidence_images_container.show()
+        self._spreadsheet_evidence_container.hide()
         first_region = _evidence_region(finding, "first")
         second_region = _evidence_region(finding, "second")
         self._first_evidence.set_evidence(
@@ -1241,8 +1357,11 @@ class MainWindow(QMainWindow):
 
     def _clear_evidence(self, message: str | None = None) -> None:
         self._evidence_images_container.setVisible(self._scan_mode == ScanMode.IMAGE)
+        self._spreadsheet_evidence_container.setVisible(self._scan_mode == ScanMode.DATA)
         self._first_evidence.set_evidence(None)
         self._second_evidence.set_evidence(None)
+        self._first_spreadsheet_evidence.clear()
+        self._second_spreadsheet_evidence.clear()
         default_message = (
             "选择一条图片结果后显示双图和匹配区域。"
             if self._scan_mode == ScanMode.IMAGE
@@ -1289,6 +1408,20 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
         state = "启用" if enabled else "关闭"
         self._status.setText(f"Western blot 单条带检测已{state}，原扫描结果已失效。")
+
+    @Slot(int)
+    def _image_analysis_mode_changed(self, index: int) -> None:
+        if self._project is None or index < 0:
+            return
+        mode = str(self._image_analysis_mode_combo.itemData(index))
+        if self._project.image_analysis_mode == mode:
+            return
+        self._project = self._project.with_image_analysis_mode(mode)
+        self._current_result = None
+        self._render_result(None)
+        self._mark_dirty()
+        label = self._image_analysis_mode_combo.itemText(index)
+        self._status.setText(f"图片内容类型已改为“{label}”，原扫描结果已失效。")
 
     @Slot()
     def _excel_settings_changed(self) -> None:
@@ -1367,6 +1500,7 @@ class MainWindow(QMainWindow):
         self._export_button.setEnabled(self._active_result_available() and not scan_running)
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
         self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
+        self._image_analysis_mode_combo.setEnabled(self._project is not None and not scan_running)
         for control in (
             self._excel_relative_tolerance_spin,
             self._excel_absolute_tolerance_edit,
@@ -1447,6 +1581,16 @@ def _read_evidence_image(source_path: str | None, page: int) -> QImage:
 
 def _evidence_summary_text(finding: Finding) -> str:
     details = finding.details
+    if finding.rule_id.startswith("image.dot_blot."):
+        return (
+            f"Dot blot 证据：匹配斑点 {details.get('matched_spot_count', '-')} 个；"
+            f"排列相似度 {_as_percent(details.get('layout_similarity'))}；"
+            f"强度/形态轮廓 {_as_percent(details.get('profile_similarity'))}；"
+            f"归一化排列误差 {details.get('layout_error', '-')}；"
+            f"两侧检出斑点 {details.get('first_spot_count', '-')} / "
+            f"{details.get('second_spot_count', '-')}；"
+            "已允许裁剪、缩放和对比度变化。"
+        )
     if finding.rule_id.startswith("image.western_blot."):
         return (
             f"Western blot 证据：匹配条带 {details.get('matched_band_count', '-')} 条；"
@@ -1518,6 +1662,15 @@ def _image_role_label(value: object) -> str:
         "unknown": "未识别",
     }
     return labels.get(str(value), str(value or "-"))
+
+
+def _column_label(column: int) -> str:
+    label = ""
+    value = max(1, column)
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        label = chr(65 + remainder) + label
+    return label
 
 
 def _excel_evidence_summary_text(finding: Finding) -> str:

@@ -78,6 +78,7 @@ class PathologyDuplicateDetector:
         self,
         path: str | Path,
         pages: tuple[NDArray, ...],
+        force: bool = False,
     ) -> tuple[PathologyRegion, ...]:
         source = str(Path(path))
         named = bool(_PATHOLOGY_NAME_PATTERN.search(Path(path).stem))
@@ -93,6 +94,7 @@ class PathologyDuplicateDetector:
                     page,
                     named,
                     magnification,
+                    force,
                 )
             )
         return tuple(extracted)
@@ -175,6 +177,7 @@ def _extract_page_regions(
     image: NDArray,
     named: bool,
     magnification: float | None,
+    force: bool = False,
 ) -> list[PathologyRegion]:
     canonical = canonical_pixels(image)
     bgr = canonical[:, :, :3]
@@ -194,7 +197,7 @@ def _extract_page_regions(
 
     morphology, tissue_mask = _stain_invariant_morphology(bgr)
     tissue_fraction = float(np.mean(tissue_mask > 0))
-    if not named and not _looks_like_pathology(bgr, tissue_mask):
+    if not force and not named and not _looks_like_pathology(bgr, tissue_mask):
         return []
     if tissue_fraction < 0.035:
         return []
@@ -285,6 +288,9 @@ def _looks_like_pathology(bgr: NDArray[np.uint8], tissue_mask: NDArray[np.uint8]
     if tissue_pixels.size == 0:
         return False
     blue, green, red = tissue_pixels.T
+    chroma = np.max(tissue_pixels, axis=1) - np.min(tissue_pixels, axis=1)
+    if float(np.mean(chroma)) < 7.0 or float(np.percentile(chroma, 75)) < 10.0:
+        return False
     stain_like = (red >= green * 0.72) & (blue >= green * 0.62)
     return float(np.mean(stain_like)) >= 0.42
 

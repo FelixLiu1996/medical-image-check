@@ -24,6 +24,7 @@ SUPPORTED_SPREADSHEET_EXTENSIONS = frozenset({".xlsx", ".xls", ".xlsm", ".csv"})
 DEFAULT_MINIMUM_DIGIT_RUN = 4
 MINIMUM_DIGIT_RUN_RANGE = range(3, 13)
 MAX_FRAGMENT_EVIDENCE_LENGTH = 128
+MAX_DIGIT_FRAGMENT_FINDINGS = 300
 
 
 class ExactExcelDuplicateDetector:
@@ -89,6 +90,8 @@ class ExactExcelDuplicateDetector:
         findings.sort(
             key=lambda item: (
                 {RiskLevel.HIGH: 0, RiskLevel.MEDIUM: 1, RiskLevel.LOW: 2}[item.risk],
+                -int(item.details.get("matched_count", item.details.get("maximum_length", 0))),
+                -item.confidence,
                 item.finding_id,
             )
         )
@@ -128,7 +131,8 @@ class ExactExcelDuplicateDetector:
         signatures: dict[tuple[tuple[int, str], ...], list[list[NumericCell]]] = defaultdict(list)
         for row_cells in rows.values():
             signature = tuple(sorted((cell.column, cell.canonical_value) for cell in row_cells))
-            if len(signature) >= 2:
+            values = {value for _, value in signature}
+            if len(signature) >= 2 and len(values) >= 2 and values != {"0", "1"}:
                 signatures[signature].append(row_cells)
 
         findings: list[Finding] = []
@@ -249,7 +253,15 @@ class ExactExcelDuplicateDetector:
                     },
                 )
             )
-        return findings
+        findings.sort(
+            key=lambda item: (
+                -int(item.details["maximum_length"]),
+                -int(item.details["distinct_value_count"]),
+                -int(item.details["cell_count"]),
+                item.finding_id,
+            )
+        )
+        return findings[:MAX_DIGIT_FRAGMENT_FINDINGS]
 
 
 def _longest_common_digit_fragments(

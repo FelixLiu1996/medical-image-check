@@ -13,9 +13,10 @@ from medical_image_check.domain.excel_settings import (
     ExcelAnalysisSettings,
     decimal_text,
 )
+from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import ScanResult
 
-PROJECT_SCHEMA_VERSION = 5
+PROJECT_SCHEMA_VERSION = 6
 DEFAULT_MINIMUM_DIGIT_RUN = 4
 
 
@@ -32,6 +33,7 @@ class Project:
     source_paths: tuple[str, ...]
     minimum_digit_run: int = DEFAULT_MINIMUM_DIGIT_RUN
     western_single_band_enabled: bool = False
+    image_analysis_mode: str = ImageAnalysisMode.AUTO.value
     excel_custom_relative_tolerance_percent: float = 0.0
     excel_absolute_tolerance: str = DEFAULT_EXCEL_ABSOLUTE_TOLERANCE
     excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS
@@ -101,6 +103,17 @@ class Project:
         return replace(
             self,
             western_single_band_enabled=enabled,
+            last_scan_result=None,
+            updated_at=_now_iso(),
+        )
+
+    def with_image_analysis_mode(self, mode: ImageAnalysisMode | str) -> Project:
+        normalized = ImageAnalysisMode(mode).value
+        if normalized == self.image_analysis_mode:
+            return self
+        return replace(
+            self,
+            image_analysis_mode=normalized,
             last_scan_result=None,
             updated_at=_now_iso(),
         )
