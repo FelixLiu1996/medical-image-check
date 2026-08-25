@@ -52,3 +52,4 @@
 - pytest 15 项通过
 - Qt offscreen 启动通过
 - Python wheel 构建与源码编译检查通过
+- GitHub CI Windows/Linux 通过（run `32821382142`）

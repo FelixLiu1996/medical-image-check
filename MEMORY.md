@@ -52,3 +52,4 @@
 - `pytest`：15 项通过。
 - Qt offscreen 启动冒烟：通过。
 - Python wheel 构建与源码编译检查：通过。
+- GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32821382142`）。
