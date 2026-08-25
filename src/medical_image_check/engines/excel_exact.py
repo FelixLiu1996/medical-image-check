@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from medical_image_check.domain.excel_settings import ExcelAnalysisSettings
 from medical_image_check.domain.models import (
     EvidenceLocation,
     Finding,
@@ -34,11 +35,13 @@ class ExactExcelDuplicateDetector:
         self,
         reader: SpreadsheetReader | None = None,
         minimum_digit_run: int = DEFAULT_MINIMUM_DIGIT_RUN,
+        analysis_settings: ExcelAnalysisSettings | None = None,
     ) -> None:
         if minimum_digit_run not in MINIMUM_DIGIT_RUN_RANGE:
             raise ValueError("连续数字片段最短长度必须在 3 到 12 之间")
         self._reader = reader or SpreadsheetReader()
         self.minimum_digit_run = minimum_digit_run
+        self.analysis_settings = analysis_settings or ExcelAnalysisSettings()
 
     def scan(
         self,
@@ -74,7 +77,13 @@ class ExactExcelDuplicateDetector:
         findings.extend(self._find_digit_fragment_duplicates(cells))
         if checkpoint:
             checkpoint()
-        findings.extend(find_advanced_excel_findings(cells))
+        findings.extend(
+            find_advanced_excel_findings(
+                cells,
+                self.analysis_settings,
+                checkpoint,
+            )
+        )
         if checkpoint:
             checkpoint()
         findings.sort(

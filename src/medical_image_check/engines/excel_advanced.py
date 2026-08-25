@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from itertools import combinations
 
 from openpyxl.utils import get_column_letter
 
+from medical_image_check.domain.excel_settings import ExcelAnalysisSettings, decimal_text
 from medical_image_check.domain.models import (
     EvidenceLocation,
     Finding,
@@ -15,6 +17,7 @@ from medical_image_check.domain.models import (
     RiskLevel,
     deterministic_finding_id,
 )
+from medical_image_check.engines.excel_patterns import find_excel_pattern_findings
 from medical_image_check.infrastructure.spreadsheets import NumericCell
 
 APPROXIMATE_RULE_ID = "excel.value.approximate"
@@ -23,15 +26,14 @@ SERIES_SCALE_RULE_ID = "excel.series.scale"
 SERIES_OFFSET_RULE_ID = "excel.series.offset"
 SERIES_SUM_RULE_ID = "excel.series.target_sum"
 SERIES_PRODUCT_RULE_ID = "excel.series.target_product"
+SERIES_DIFFERENCE_RULE_ID = "excel.series.target_difference"
+SERIES_QUOTIENT_RULE_ID = "excel.series.target_quotient"
 
 APPROXIMATE_BANDS = (
     (Decimal("0.0001"), "0.01%"),
     (Decimal("0.001"), "0.1%"),
     (Decimal("0.01"), "1%"),
 )
-DEFAULT_ABSOLUTE_TOLERANCE = Decimal("1e-12")
-TRANSFORM_RELATIVE_TOLERANCE = Decimal("1e-9")
-TRANSFORM_ABSOLUTE_TOLERANCE = Decimal("1e-12")
 MINIMUM_SERIES_LENGTH = 3
 ALL_PAIRS_SERIES_LIMIT = 250
 
@@ -65,13 +67,25 @@ class _NumericSeries:
         )
 
 
-def find_advanced_excel_findings(cells: list[NumericCell]) -> list[Finding]:
-    findings = _find_approximate_values(cells)
-    findings.extend(_find_series_relations(cells))
+def find_advanced_excel_findings(
+    cells: list[NumericCell],
+    settings: ExcelAnalysisSettings | None = None,
+    checkpoint: Callable[[], None] | None = None,
+) -> list[Finding]:
+    configured = settings or ExcelAnalysisSettings()
+    findings = _find_approximate_values(cells, configured)
+    if checkpoint:
+        checkpoint()
+    findings.extend(_find_series_relations(cells, configured, checkpoint))
+    if checkpoint:
+        checkpoint()
+    findings.extend(find_excel_pattern_findings(cells, configured, checkpoint))
     return findings
 
 
-def _find_approximate_values(cells: list[NumericCell]) -> list[Finding]:
+def _find_approximate_values(
+    cells: list[NumericCell], settings: ExcelAnalysisSettings
+) -> list[Finding]:
     grouped: dict[str, list[NumericCell]] = defaultdict(list)
     for cell in cells:
         grouped[cell.canonical_value].append(cell)
@@ -93,13 +107,13 @@ def _find_approximate_values(cells: list[NumericCell]) -> list[Finding]:
         (
             (group.value, index)
             for index, group in enumerate(value_groups)
-            if abs(group.value) <= DEFAULT_ABSOLUTE_TOLERANCE
+            if abs(group.value) <= settings.absolute_tolerance
         ),
         key=lambda item: item[0],
     )
     for group_indexes in _anchored_clusters(
         near_zero,
-        absolute_tolerance=DEFAULT_ABSOLUTE_TOLERANCE,
+        absolute_tolerance=settings.absolute_tolerance,
     ):
         approximate_groups[tuple(sorted(group_indexes))] = "绝对容差"
 
@@ -107,6 +121,14 @@ def _find_approximate_values(cells: list[NumericCell]) -> list[Finding]:
         for ordered in (positive, negative):
             for group_indexes in _anchored_clusters(ordered, relative_tolerance=threshold):
                 approximate_groups.setdefault(tuple(sorted(group_indexes)), label)
+    custom_threshold = settings.custom_relative_tolerance
+    if custom_threshold > 0 and custom_threshold not in {
+        threshold for threshold, _ in APPROXIMATE_BANDS
+    }:
+        custom_label = f"自定义 {decimal_text(settings.custom_relative_tolerance_percent)}%"
+        for ordered in (positive, negative):
+            for group_indexes in _anchored_clusters(ordered, relative_tolerance=custom_threshold):
+                approximate_groups.setdefault(tuple(sorted(group_indexes)), custom_label)
 
     findings: list[Finding] = []
     for group_indexes, band in sorted(approximate_groups.items()):
@@ -121,7 +143,12 @@ def _find_approximate_values(cells: list[NumericCell]) -> list[Finding]:
             key=lambda cell: (cell.source_path, cell.sheet, cell.row, cell.column),
         )
         locations = tuple(cell.location for cell in grouped_cells)
-        confidence = {"绝对容差": 0.7, "0.01%": 0.65, "0.1%": 0.55, "1%": 0.45}[band]
+        confidence = {
+            "绝对容差": 0.7,
+            "0.01%": 0.65,
+            "0.1%": 0.55,
+            "1%": 0.45,
+        }.get(band, 0.4)
         findings.append(
             Finding(
                 finding_id=deterministic_finding_id(APPROXIMATE_RULE_ID, locations),
@@ -184,11 +211,19 @@ def _relative_error(first: Decimal, second: Decimal) -> Decimal:
     return abs(first - second) / scale
 
 
-def _find_series_relations(cells: list[NumericCell]) -> list[Finding]:
+def _find_series_relations(
+    cells: list[NumericCell],
+    settings: ExcelAnalysisSettings,
+    checkpoint: Callable[[], None] | None = None,
+) -> list[Finding]:
     series = _collect_series(cells)
     findings: list[Finding] = []
-    for first_index, second_index in sorted(_series_candidate_pairs(series)):
-        findings.extend(_compare_series(series[first_index], series[second_index]))
+    for pair_index, (first_index, second_index) in enumerate(
+        sorted(_series_candidate_pairs(series))
+    ):
+        if checkpoint and pair_index % 128 == 0:
+            checkpoint()
+        findings.extend(_compare_series(series[first_index], series[second_index], settings))
     return findings
 
 
@@ -259,17 +294,22 @@ def _series_shape(
     return tuple(normalized)
 
 
-def _compare_series(first: _NumericSeries, second: _NumericSeries) -> list[Finding]:
+def _compare_series(
+    first: _NumericSeries,
+    second: _NumericSeries,
+    settings: ExcelAnalysisSettings,
+) -> list[Finding]:
     first_values = first.values
     second_values = second.values
     if len(first_values) != len(second_values):
         return []
 
     relations: list[tuple[str, str, str, Decimal, tuple[Decimal, ...]]] = []
-    if all(
+    series_exact = all(
         first_value == second_value
         for first_value, second_value in zip(first_values, second_values, strict=True)
-    ):
+    )
+    if series_exact:
         relations.append(
             (
                 SERIES_EXACT_RULE_ID,
@@ -280,8 +320,8 @@ def _compare_series(first: _NumericSeries, second: _NumericSeries) -> list[Findi
             )
         )
     else:
-        factor = _constant_scale(first_values, second_values)
-        if factor is not None and not _decimal_close(factor, Decimal(1)):
+        factor = _constant_scale(first_values, second_values, settings)
+        if factor is not None and not settings.close(factor, Decimal(1)):
             relations.append(
                 (
                     SERIES_SCALE_RULE_ID,
@@ -291,8 +331,8 @@ def _compare_series(first: _NumericSeries, second: _NumericSeries) -> list[Findi
                     tuple(factor * value for value in first_values),
                 )
             )
-        offset = _constant_offset(first_values, second_values)
-        if offset is not None and not _decimal_close(offset, Decimal(0)):
+        offset = _constant_offset(first_values, second_values, settings)
+        if offset is not None and not settings.close(offset, Decimal(0)):
             relations.append(
                 (
                     SERIES_OFFSET_RULE_ID,
@@ -307,7 +347,7 @@ def _compare_series(first: _NumericSeries, second: _NumericSeries) -> list[Findi
         first_value + second_value
         for first_value, second_value in zip(first_values, second_values, strict=True)
     )
-    sum_target = _constant_integer_target(summed)
+    sum_target = settings.target_for(summed)
     if sum_target is not None:
         relations.append(
             (
@@ -323,7 +363,7 @@ def _compare_series(first: _NumericSeries, second: _NumericSeries) -> list[Findi
         first_value * second_value
         for first_value, second_value in zip(first_values, second_values, strict=True)
     )
-    product_target = _constant_integer_target(products)
+    product_target = settings.target_for(products)
     if product_target is not None:
         relations.append(
             (
@@ -335,42 +375,66 @@ def _compare_series(first: _NumericSeries, second: _NumericSeries) -> list[Findi
             )
         )
 
-    return [_series_finding(first, second, *relation) for relation in relations]
+    differences = tuple(
+        first_value - second_value
+        for first_value, second_value in zip(first_values, second_values, strict=True)
+    )
+    difference_target = settings.target_for(differences) if not series_exact else None
+    if difference_target is not None:
+        relations.append(
+            (
+                SERIES_DIFFERENCE_RULE_ID,
+                "配对数值相减得到固定目标",
+                f"第一列减第二列持续得到目标 {difference_target}。",
+                difference_target,
+                differences,
+            )
+        )
+
+    if not series_exact and all(value != 0 for value in second_values):
+        quotients = tuple(
+            first_value / second_value
+            for first_value, second_value in zip(first_values, second_values, strict=True)
+        )
+        quotient_target = settings.target_for(quotients)
+        if quotient_target is not None:
+            relations.append(
+                (
+                    SERIES_QUOTIENT_RULE_ID,
+                    "配对数值相除得到固定目标",
+                    f"第一列除以第二列持续得到目标 {quotient_target}。",
+                    quotient_target,
+                    quotients,
+                )
+            )
+
+    return [_series_finding(first, second, *relation, settings) for relation in relations]
 
 
-def _constant_scale(first: tuple[Decimal, ...], second: tuple[Decimal, ...]) -> Decimal | None:
+def _constant_scale(
+    first: tuple[Decimal, ...],
+    second: tuple[Decimal, ...],
+    settings: ExcelAnalysisSettings,
+) -> Decimal | None:
     ratios = [right / left for left, right in zip(first, second, strict=True) if left != 0]
     if not ratios:
         return None
     factor = _median(ratios)
-    if all(_decimal_close(right, factor * left) for left, right in zip(first, second, strict=True)):
+    if all(settings.close(right, factor * left) for left, right in zip(first, second, strict=True)):
         return factor
     return None
 
 
-def _constant_offset(first: tuple[Decimal, ...], second: tuple[Decimal, ...]) -> Decimal | None:
+def _constant_offset(
+    first: tuple[Decimal, ...],
+    second: tuple[Decimal, ...],
+    settings: ExcelAnalysisSettings,
+) -> Decimal | None:
     differences = [right - left for left, right in zip(first, second, strict=True)]
     offset = _median(differences)
-    if all(_decimal_close(right, left + offset) for left, right in zip(first, second, strict=True)):
+    if all(settings.close(right, left + offset) for left, right in zip(first, second, strict=True)):
         return offset
     return None
-
-
-def _constant_integer_target(values: tuple[Decimal, ...]) -> Decimal | None:
-    target = _median(list(values))
-    if target != target.to_integral_value():
-        return None
-    if all(_decimal_close(value, target) for value in values):
-        return target
-    return None
-
-
-def _decimal_close(first: Decimal, second: Decimal) -> bool:
-    difference = abs(first - second)
-    tolerance = TRANSFORM_ABSOLUTE_TOLERANCE + TRANSFORM_RELATIVE_TOLERANCE * max(
-        abs(first), abs(second)
-    )
-    return difference <= tolerance
 
 
 def _median(values: list[Decimal]) -> Decimal:
@@ -389,10 +453,11 @@ def _series_finding(
     description: str,
     parameter: Decimal,
     results: tuple[Decimal, ...],
+    settings: ExcelAnalysisSettings,
 ) -> Finding:
     locations = (first.location, second.location)
     matched_count = len(first.cells)
-    risk = RiskLevel.HIGH if matched_count >= 4 else RiskLevel.MEDIUM
+    risk = settings.risk_for_run(matched_count)
     paired_values = [
         {
             "position": index,

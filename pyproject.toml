@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medical-image-check"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "Local duplicate detection for medical research images and spreadsheet data"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -45,11 +45,13 @@ files = [
   "src/medical_image_check/__main__.py",
   "src/medical_image_check/app.py",
   "src/medical_image_check/domain/__init__.py",
+  "src/medical_image_check/domain/excel_settings.py",
   "src/medical_image_check/domain/models.py",
   "src/medical_image_check/domain/project.py",
   "src/medical_image_check/engines/__init__.py",
   "src/medical_image_check/engines/excel_advanced.py",
   "src/medical_image_check/engines/excel_exact.py",
+  "src/medical_image_check/engines/excel_patterns.py",
   "src/medical_image_check/engines/fluorescence.py",
   "src/medical_image_check/engines/image_exact.py",
   "src/medical_image_check/engines/image_similarity.py",

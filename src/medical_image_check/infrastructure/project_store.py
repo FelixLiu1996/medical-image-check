@@ -3,6 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from medical_image_check.domain.excel_settings import (
+    DEFAULT_EXCEL_ABSOLUTE_TOLERANCE,
+    DEFAULT_EXCEL_HIGH_RUN_LENGTH,
+    DEFAULT_EXCEL_MEDIUM_RUN_LENGTH,
+    DEFAULT_EXCEL_OPERATION_TARGETS,
+    ExcelAnalysisSettings,
+    decimal_text,
+)
 from medical_image_check.domain.models import (
     EvidenceLocation,
     Finding,
@@ -46,6 +54,19 @@ class ProjectStore:
         western_single_band_enabled = payload.get("western_single_band_enabled", False)
         if not isinstance(western_single_band_enabled, bool):
             raise ValueError("项目文件中的 western_single_band_enabled 必须为布尔值")
+        excel_payload = payload.get("excel_analysis_settings", {})
+        if not isinstance(excel_payload, dict):
+            raise ValueError("项目文件中的 excel_analysis_settings 无效")
+        targets_payload = excel_payload.get("operation_targets", DEFAULT_EXCEL_OPERATION_TARGETS)
+        if not isinstance(targets_payload, list | tuple):
+            raise ValueError("项目文件中的 Excel 运算目标必须为列表")
+        excel_settings = ExcelAnalysisSettings.from_values(
+            excel_payload.get("custom_relative_tolerance_percent", 0),
+            excel_payload.get("absolute_tolerance", DEFAULT_EXCEL_ABSOLUTE_TOLERANCE),
+            targets_payload,
+            int(excel_payload.get("medium_run_length", DEFAULT_EXCEL_MEDIUM_RUN_LENGTH)),
+            int(excel_payload.get("high_run_length", DEFAULT_EXCEL_HIGH_RUN_LENGTH)),
+        )
         scan_payload = payload.get("last_scan_result")
         return Project(
             project_id=str(payload["project_id"]),
@@ -55,6 +76,15 @@ class ProjectStore:
             source_paths=tuple(str(item) for item in source_paths),
             minimum_digit_run=minimum_digit_run,
             western_single_band_enabled=western_single_band_enabled,
+            excel_custom_relative_tolerance_percent=float(
+                excel_settings.custom_relative_tolerance_percent
+            ),
+            excel_absolute_tolerance=decimal_text(excel_settings.absolute_tolerance),
+            excel_operation_targets=tuple(
+                decimal_text(value) for value in excel_settings.operation_targets
+            ),
+            excel_medium_run_length=excel_settings.medium_run_length,
+            excel_high_run_length=excel_settings.high_run_length,
             last_scan_result=_scan_result_from_dict(scan_payload) if scan_payload else None,
             report_paths=tuple(str(item) for item in report_paths),
             schema_version=PROJECT_SCHEMA_VERSION,
@@ -71,6 +101,13 @@ def _project_to_dict(project: Project) -> dict[str, object]:
         "source_paths": list(project.source_paths),
         "minimum_digit_run": project.minimum_digit_run,
         "western_single_band_enabled": project.western_single_band_enabled,
+        "excel_analysis_settings": {
+            "custom_relative_tolerance_percent": (project.excel_custom_relative_tolerance_percent),
+            "absolute_tolerance": project.excel_absolute_tolerance,
+            "operation_targets": list(project.excel_operation_targets),
+            "medium_run_length": project.excel_medium_run_length,
+            "high_run_length": project.excel_high_run_length,
+        },
         "last_scan_result": (
             _scan_result_to_dict(project.last_scan_result) if project.last_scan_result else None
         ),

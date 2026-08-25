@@ -38,6 +38,12 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     window._append_sources([str(source)])
     window._digit_run_spin.setValue(6)
     window._western_single_band_check.setChecked(True)
+    window._excel_relative_tolerance_spin.setValue(0.25)
+    window._excel_absolute_tolerance_edit.setText("1e-9")
+    window._excel_operation_targets_edit.setText("0, 1, 50, 100")
+    window._excel_medium_run_spin.setValue(4)
+    window._excel_high_run_spin.setValue(6)
+    window._excel_settings_changed()
     window._show_result(ScanResult(1, 1, 0, (), ()))
     window.save_project()
     report = window.export_excel_report(tmp_path / "ui-report.xlsx")
@@ -54,6 +60,11 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     assert restored._digit_run_spin.value() == 6
     assert restored._project.western_single_band_enabled is True
     assert restored._western_single_band_check.isChecked()
+    assert restored._project.excel_custom_relative_tolerance_percent == 0.25
+    assert restored._excel_absolute_tolerance_edit.text() == "0.000000001"
+    assert restored._project.excel_operation_targets == ("0", "1", "50", "100")
+    assert restored._excel_medium_run_spin.value() == 4
+    assert restored._excel_high_run_spin.value() == 6
     assert restored._current_result == ScanResult(1, 1, 0, (), ())
     assert report.exists()
     assert html_report.exists()

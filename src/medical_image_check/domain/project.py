@@ -5,9 +5,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from medical_image_check.domain.excel_settings import (
+    DEFAULT_EXCEL_ABSOLUTE_TOLERANCE,
+    DEFAULT_EXCEL_HIGH_RUN_LENGTH,
+    DEFAULT_EXCEL_MEDIUM_RUN_LENGTH,
+    DEFAULT_EXCEL_OPERATION_TARGETS,
+    ExcelAnalysisSettings,
+    decimal_text,
+)
 from medical_image_check.domain.models import ScanResult
 
-PROJECT_SCHEMA_VERSION = 4
+PROJECT_SCHEMA_VERSION = 5
 DEFAULT_MINIMUM_DIGIT_RUN = 4
 
 
@@ -24,6 +32,11 @@ class Project:
     source_paths: tuple[str, ...]
     minimum_digit_run: int = DEFAULT_MINIMUM_DIGIT_RUN
     western_single_band_enabled: bool = False
+    excel_custom_relative_tolerance_percent: float = 0.0
+    excel_absolute_tolerance: str = DEFAULT_EXCEL_ABSOLUTE_TOLERANCE
+    excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS
+    excel_medium_run_length: int = DEFAULT_EXCEL_MEDIUM_RUN_LENGTH
+    excel_high_run_length: int = DEFAULT_EXCEL_HIGH_RUN_LENGTH
     last_scan_result: ScanResult | None = None
     report_paths: tuple[str, ...] = ()
     schema_version: int = PROJECT_SCHEMA_VERSION
@@ -88,6 +101,48 @@ class Project:
         return replace(
             self,
             western_single_band_enabled=enabled,
+            last_scan_result=None,
+            updated_at=_now_iso(),
+        )
+
+    def with_excel_analysis_settings(
+        self,
+        custom_relative_tolerance_percent: str | float,
+        absolute_tolerance: str,
+        operation_targets: list[str] | tuple[str, ...],
+        medium_run_length: int,
+        high_run_length: int,
+    ) -> Project:
+        settings = ExcelAnalysisSettings.from_values(
+            custom_relative_tolerance_percent,
+            absolute_tolerance,
+            operation_targets,
+            medium_run_length,
+            high_run_length,
+        )
+        normalized = (
+            float(settings.custom_relative_tolerance_percent),
+            decimal_text(settings.absolute_tolerance),
+            tuple(decimal_text(value) for value in settings.operation_targets),
+            settings.medium_run_length,
+            settings.high_run_length,
+        )
+        current = (
+            self.excel_custom_relative_tolerance_percent,
+            self.excel_absolute_tolerance,
+            self.excel_operation_targets,
+            self.excel_medium_run_length,
+            self.excel_high_run_length,
+        )
+        if normalized == current:
+            return self
+        return replace(
+            self,
+            excel_custom_relative_tolerance_percent=normalized[0],
+            excel_absolute_tolerance=normalized[1],
+            excel_operation_targets=normalized[2],
+            excel_medium_run_length=normalized[3],
+            excel_high_run_length=normalized[4],
             last_scan_result=None,
             updated_at=_now_iso(),
         )

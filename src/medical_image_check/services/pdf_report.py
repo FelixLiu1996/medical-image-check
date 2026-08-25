@@ -229,6 +229,27 @@ def _overview_table(result: ScanResult, project: Project | None, styles) -> Tabl
             "扫描提示",
             str(len(result.issues)),
         ],
+        [
+            "Excel 容差",
+            (
+                f"相对 {project.excel_custom_relative_tolerance_percent}% / "
+                f"绝对 {project.excel_absolute_tolerance}"
+                if project
+                else "-"
+            ),
+            "连续风险阈值",
+            (
+                f"{project.excel_medium_run_length} / {project.excel_high_run_length}"
+                if project
+                else "-"
+            ),
+        ],
+        [
+            "Excel 运算目标",
+            ", ".join(project.excel_operation_targets) if project else "-",
+            "Western 单条带",
+            "启用" if project and project.western_single_band_enabled else "关闭",
+        ],
     ]
     formatted = [[Paragraph(escape(str(cell)), styles["Small"]) for cell in row] for row in rows]
     table = Table(formatted, colWidths=[27 * mm, 57 * mm, 27 * mm, 67 * mm])

@@ -13,8 +13,8 @@
 - 本地 Git 已绑定远程仓库 `origin`：`https://github.com/FelixLiu1996/medical-image-check.git`。
 - 当前分支：`codex/v0.1-foundation`。
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
-- 已实现项目 UI 生命周期、扫描结果持久化、基础 Excel/数值证据报告、图片文件/解码像素重复、整体感知近似、局部几何重叠、Western/荧光/病理专项，以及 Excel 精确/片段/近似/连续列关系和 CI。
-- 项目清单已升级为 schema 4，并兼容读取 schema 1/2/3；保存连续数字片段 3–12 位设置和 Western blot 单条带开关。
+- 已实现项目 UI 生命周期、扫描结果持久化、三种本地报告、图片文件/解码像素重复、整体感知近似、局部几何重叠、Western/荧光/病理专项，以及 Excel 精确/片段/近似/运算/结构/稳健线性/统计规则和 CI。
+- 项目清单已升级为 schema 5，并兼容读取 schema 1/2/3/4；保存连续数字片段、Western blot 单条带开关及 Excel 容差、运算目标和连续风险阈值。
 - 已建立 Windows portable 工作流和 ADR-0003，并通过 GitHub Windows runner 构建、冒烟及下载校验。
 - 已实现 Western blot 明暗条带/面板候选、分段索引、结构/几何/背景/掩膜验证、同图 Copy-Move 和可选单条带低风险检测。
 - 已实现荧光通道/合并角色、同视野配准、Merge 成分正常关系和同通道疑似复用基线。
@@ -25,7 +25,8 @@
 - GUI 增加统一报告导出、聚焦匹配区域和复制证据摘要。
 - ADR-0004 记录 HTML/PDF 方案；ReportLab、Pillow、charset-normalizer 已登记并加入 portable 许可证收集。
 - 打包程序 `--smoke-test` 会实际生成并校验 Excel、HTML、PDF 三种临时报告，Windows portable 必须通过该路径。
-- 本地开发版本为 `0.1.0a7`，扫描算法版本仍为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`。
+- Excel 全局扫描已支持自定义相对/绝对容差、单次与连续四则运算、连续片段、乱序、少量修改、二维区域、Theil–Sen 稳健线性和固定低风险统计提示；GUI、项目恢复和三种报告已贯通参数与证据。
+- 本地开发版本为 `0.1.0a8`，扫描算法版本为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`。
 
 ## 已确认的重要方向
 
@@ -50,12 +51,12 @@
 - Windows portable 已通过 GitHub Windows runner 构建与打包冒烟；干净 Windows 10/11 实机人工操作仍待验证。
 - 局部图像裁剪/重叠和 Western/荧光/病理三个专项基线已实现；通用单图 Copy-Move、可调整多面板拆分、荧光实验组语义和病理连续切片语义尚未实现。
 - Western blot 当前只形成明显横向条带行候选，复杂排版、弱条带、文字标签、任意擦除/拼接仍待验收数据和后续算法覆盖。
-- Excel 数字片段、默认近似档位和连续列关系已实现；自定义容差、单次运算、顺序打乱、区域与统计规则尚未实现。
+- Excel 已确认规则的全局扫描 Alpha 基线已实现；自动识别实验组、手动框选区域和人工复核结论/备注编辑尚未实现。新增结构/运算/统计规则每类最多保留 300 条，统计相似始终只标低风险。
 
 ## 下一步
 
 1. 使用授权 Western/荧光/病理正负例调优阈值、实验组和连续切片边界。
-2. 后续补齐未完成 Excel 规则与参数界面。
+2. 使用授权 Excel 正负例校准新增规则，并设计自动识别与手动框选扫描方式。
 3. 设计持久化任务断点、崩溃恢复和历史库。
 4. 在干净 Windows 10/11 实机验证 GUI、暂停/取消、三种报告和 PDF 字体/打印。
 
@@ -66,7 +67,7 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：74 项通过。
+- `pytest`：86 项通过。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
@@ -87,3 +88,4 @@
 - HTML：单文件内嵌 PNG、搜索/风险筛选、无网络资源及源图不变测试通过。
 - PDF：两页中文样例通过 Poppler 全页渲染目视检查，标题/结果/图像证据/扫描提示文本层经 pypdf 验证可检索；ReportLab/Pillow/charset-normalizer 许可证收集通过。
 - 远程验收：GitHub CI Windows/Linux run `32844253484` 通过；Windows portable run `32844253505` 完成 standalone、打包 EXE 三报告冒烟、许可证收集和上传，工件 92.1 MB，artifact digest `63d43c1488b5798e28ceccc57185617c3e4ad4c688868658fdf8fc52e6068e74`。
+- `excel-advanced-2` 合成测试覆盖自定义容差、四则运算、连续片段、乱序、少量修改、二维区域、稳健线性、汇总/分布统计、schema 5 和 GUI 参数恢复；80,000 个内存数值单元格压力检查约 3.3 秒、最大 RSS 约 95 MiB（不含读取、旧规则和报告）。

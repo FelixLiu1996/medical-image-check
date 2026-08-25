@@ -65,6 +65,27 @@ class ExcelReportExporter:
                 "Western blot 单条带检测",
                 "启用" if project and project.western_single_band_enabled else "关闭",
             ),
+            (
+                "Excel 自定义相对容差",
+                f"{project.excel_custom_relative_tolerance_percent}%" if project else "",
+            ),
+            (
+                "Excel 绝对容差",
+                project.excel_absolute_tolerance if project else "",
+            ),
+            (
+                "Excel 运算目标",
+                ", ".join(project.excel_operation_targets) if project else "",
+            ),
+            (
+                "Excel 连续关系风险阈值",
+                (
+                    f"中风险 {project.excel_medium_run_length}；"
+                    f"高风险 {project.excel_high_run_length}"
+                )
+                if project
+                else "",
+            ),
             ("扫描文件数", result.source_count),
             ("图片数", result.image_count),
             ("表格数", result.spreadsheet_count),

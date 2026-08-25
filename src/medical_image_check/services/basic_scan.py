@@ -5,6 +5,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 
+from medical_image_check.domain.excel_settings import (
+    DEFAULT_EXCEL_ABSOLUTE_TOLERANCE,
+    DEFAULT_EXCEL_HIGH_RUN_LENGTH,
+    DEFAULT_EXCEL_MEDIUM_RUN_LENGTH,
+    DEFAULT_EXCEL_OPERATION_TARGETS,
+    ExcelAnalysisSettings,
+)
 from medical_image_check.domain.models import ScanResult
 from medical_image_check.engines.excel_exact import (
     SUPPORTED_SPREADSHEET_EXTENSIONS,
@@ -17,7 +24,7 @@ from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
-    "generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1"
+    "generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2"
 )
 
 
@@ -65,9 +72,24 @@ class BasicScanService:
         self,
         minimum_digit_run: int = 4,
         western_single_band_enabled: bool = False,
+        excel_custom_relative_tolerance_percent: str | float = 0,
+        excel_absolute_tolerance: str = DEFAULT_EXCEL_ABSOLUTE_TOLERANCE,
+        excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS,
+        excel_medium_run_length: int = DEFAULT_EXCEL_MEDIUM_RUN_LENGTH,
+        excel_high_run_length: int = DEFAULT_EXCEL_HIGH_RUN_LENGTH,
     ) -> None:
+        excel_settings = ExcelAnalysisSettings.from_values(
+            excel_custom_relative_tolerance_percent,
+            excel_absolute_tolerance,
+            excel_operation_targets,
+            excel_medium_run_length,
+            excel_high_run_length,
+        )
         self._image_detector = ImageDuplicateDetector(western_single_band_enabled)
-        self._excel_detector = ExactExcelDuplicateDetector(minimum_digit_run=minimum_digit_run)
+        self._excel_detector = ExactExcelDuplicateDetector(
+            minimum_digit_run=minimum_digit_run,
+            analysis_settings=excel_settings,
+        )
 
     def collect_supported_files(
         self,

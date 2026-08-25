@@ -69,6 +69,12 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
     assert numeric_evidence["G2"].value == "2.5"
     assert workbook["扫描提示"]["C2"].value == "公式无缓存"
     assert workbook["项目输入"]["B2"].value == str(source.resolve())
+    overview = {
+        row[0].value: row[1].value for row in workbook["扫描概览"].iter_rows(min_row=2, max_col=2)
+    }
+    assert overview["Excel 自定义相对容差"] == "0.0%"
+    assert overview["Excel 运算目标"] == "0, 1, 10, 100, 1000"
+    assert overview["Excel 连续关系风险阈值"] == "中风险 3；高风险 4"
     workbook.close()
     assert source.read_bytes() == b"unchanged-source"
 

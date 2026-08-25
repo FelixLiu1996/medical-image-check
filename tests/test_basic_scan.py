@@ -37,9 +37,10 @@ def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) ->
         "image.file.sha256",
         "excel.value.exact",
         "excel.row.exact",
+        "excel.cell.target_operation",
     }
     assert result.algorithm_version == (
-        "generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1"
+        "generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2"
     )
     assert result.completed_at is not None
     assert progress[-1][:2] == (3, 3)

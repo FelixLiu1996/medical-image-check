@@ -170,3 +170,52 @@ def test_project_store_migrates_schema_version_three_western_setting(
 
     assert loaded.schema_version == PROJECT_SCHEMA_VERSION
     assert loaded.western_single_band_enabled is False
+
+
+def test_project_excel_settings_persist_and_invalidate_scan(tmp_path: Path) -> None:
+    project = Project.create("Excel 参数").with_scan_result(ScanResult(0, 0, 0, ()))
+
+    changed = project.with_excel_analysis_settings(
+        0.25,
+        "1e-9",
+        ("0", "1", "50", "100"),
+        4,
+        6,
+    )
+    destination = tmp_path / "excel-settings.mic-project.json"
+    ProjectStore().save(changed, destination)
+    loaded = ProjectStore().load(destination)
+
+    assert changed.last_scan_result is None
+    assert loaded.excel_custom_relative_tolerance_percent == 0.25
+    assert loaded.excel_absolute_tolerance == "0.000000001"
+    assert loaded.excel_operation_targets == ("0", "1", "50", "100")
+    assert loaded.excel_medium_run_length == 4
+    assert loaded.excel_high_run_length == 6
+
+
+def test_project_store_migrates_schema_version_four_excel_settings(tmp_path: Path) -> None:
+    destination = tmp_path / "schema-four.mic-project.json"
+    destination.write_text(
+        json.dumps(
+            {
+                "schema_version": 4,
+                "project_id": "schema-four",
+                "name": "版本四项目",
+                "created_at": "2026-08-25T00:00:00+00:00",
+                "updated_at": "2026-08-25T00:00:00+00:00",
+                "source_paths": [],
+                "minimum_digit_run": 4,
+                "western_single_band_enabled": False,
+                "last_scan_result": None,
+                "report_paths": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = ProjectStore().load(destination)
+
+    assert loaded.schema_version == PROJECT_SCHEMA_VERSION
+    assert loaded.excel_custom_relative_tolerance_percent == 0
+    assert loaded.excel_operation_targets == ("0", "1", "10", "100", "1000")

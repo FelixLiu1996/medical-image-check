@@ -55,6 +55,7 @@ def _render_html(result: ScanResult, project: Project | None) -> str:
         or '<tr><td colspan="3">无扫描提示</td></tr>'
     )
     project_name = project.name if project else "未关联项目"
+    parameter_text = _project_parameter_text(project)
     source_count = result.source_count
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -79,7 +80,7 @@ details{{margin-top:8px}} pre{{white-space:pre-wrap;word-break:break-word;backgr
 </style>
 </head>
 <body><main>
-<header><h1>医学实验图像与数据查重报告</h1><div class="meta">项目：{escape(project_name)} · 软件 {escape(__version__)} · 算法 {escape(result.algorithm_version)}</div><div class="meta">扫描：{escape(result.completed_at or "未记录")} · 生成：{escape(generated_at)}</div></header>
+<header><h1>医学实验图像与数据查重报告</h1><div class="meta">项目：{escape(project_name)} · 软件 {escape(__version__)} · 算法 {escape(result.algorithm_version)}</div><div class="meta">扫描：{escape(result.completed_at or "未记录")} · 生成：{escape(generated_at)}</div><div class="meta">{escape(parameter_text)}</div></header>
 <div class="notice">{escape(REPORT_DISCLAIMER)}</div>
 <section class="cards">
 <div class="card"><span>输入文件</span><b>{source_count}</b></div><div class="card"><span>图片 / 表格</span><b>{result.image_count} / {result.spreadsheet_count}</b></div>
@@ -96,6 +97,18 @@ const search=document.querySelector('#search'),risk=document.querySelector('#ris
 function filterRows(){{const q=search.value.trim().toLowerCase(),r=risk.value;for(const row of rows){{row.hidden=!!((r&&row.dataset.risk!==r)||(q&&!row.innerText.toLowerCase().includes(q)))}}}}
 search.addEventListener('input',filterRows);risk.addEventListener('change',filterRows);
 </script></body></html>"""
+
+
+def _project_parameter_text(project: Project | None) -> str:
+    if project is None:
+        return "扫描参数：未关联项目"
+    return (
+        f"扫描参数：数字片段 {project.minimum_digit_run} 位；"
+        f"Excel 相对容差 {project.excel_custom_relative_tolerance_percent}%；"
+        f"绝对容差 {project.excel_absolute_tolerance}；"
+        f"目标 {', '.join(project.excel_operation_targets)}；"
+        f"连续风险阈值 {project.excel_medium_run_length}/{project.excel_high_run_length}"
+    )
 
 
 def _finding_row(finding) -> str:

@@ -18,11 +18,13 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QMainWindow,
     QMessageBox,
@@ -152,19 +154,36 @@ class ScanWorker(QObject):
         sources: list[str],
         minimum_digit_run: int,
         western_single_band_enabled: bool,
+        excel_custom_relative_tolerance_percent: float,
+        excel_absolute_tolerance: str,
+        excel_operation_targets: tuple[str, ...],
+        excel_medium_run_length: int,
+        excel_high_run_length: int,
     ) -> None:
         super().__init__()
         self._sources = sources
         self._minimum_digit_run = minimum_digit_run
         self._western_single_band_enabled = western_single_band_enabled
+        self._excel_custom_relative_tolerance_percent = excel_custom_relative_tolerance_percent
+        self._excel_absolute_tolerance = excel_absolute_tolerance
+        self._excel_operation_targets = excel_operation_targets
+        self._excel_medium_run_length = excel_medium_run_length
+        self._excel_high_run_length = excel_high_run_length
         self.control = ScanControl()
 
     @Slot()
     def run(self) -> None:
         try:
             result = BasicScanService(
-                self._minimum_digit_run,
-                self._western_single_band_enabled,
+                minimum_digit_run=self._minimum_digit_run,
+                western_single_band_enabled=self._western_single_band_enabled,
+                excel_custom_relative_tolerance_percent=(
+                    self._excel_custom_relative_tolerance_percent
+                ),
+                excel_absolute_tolerance=self._excel_absolute_tolerance,
+                excel_operation_targets=self._excel_operation_targets,
+                excel_medium_run_length=self._excel_medium_run_length,
+                excel_high_run_length=self._excel_high_run_length,
             ).scan(self._sources, self.progress.emit, self.control)
         except ScanCancelled:
             self.cancelled.emit()
@@ -178,7 +197,7 @@ class ScanWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.resize(1100, 720)
+        self.resize(1180, 820)
         self._thread: QThread | None = None
         self._worker: ScanWorker | None = None
         self._project: Project | None = None
@@ -202,7 +221,7 @@ class MainWindow(QMainWindow):
 
         title = QLabel("医学实验图像与数据查重")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        subtitle = QLabel("当前 Alpha 支持三种本地报告、通用图片查重及 Western/荧光/病理专项候选。")
+        subtitle = QLabel("当前 Alpha 支持三种本地报告、图像专项候选及可调参数的 Excel 全局查重。")
         subtitle.setStyleSheet("color: #666;")
         self._project_label = QLabel()
         self._project_label.setStyleSheet("color: #1f4e78; font-weight: 600;")
@@ -260,6 +279,47 @@ class MainWindow(QMainWindow):
         scan_settings.addStretch(1)
         layout.addLayout(scan_settings)
 
+        excel_settings_group = QGroupBox("Excel 高级规则参数")
+        excel_settings_layout = QVBoxLayout(excel_settings_group)
+        excel_settings_first_row = QHBoxLayout()
+        excel_settings_first_row.addWidget(QLabel("自定义相对容差："))
+        self._excel_relative_tolerance_spin = QDoubleSpinBox()
+        self._excel_relative_tolerance_spin.setRange(0, 100)
+        self._excel_relative_tolerance_spin.setDecimals(4)
+        self._excel_relative_tolerance_spin.setSingleStep(0.01)
+        self._excel_relative_tolerance_spin.setSuffix(" %")
+        self._excel_relative_tolerance_spin.setToolTip(
+            "0 表示仅使用内置 0.01%、0.1%、1% 档位；非零值也用于变换关系容差。"
+        )
+        excel_settings_first_row.addWidget(self._excel_relative_tolerance_spin)
+        excel_settings_first_row.addWidget(QLabel("绝对容差："))
+        self._excel_absolute_tolerance_edit = QLineEdit()
+        self._excel_absolute_tolerance_edit.setMaximumWidth(150)
+        self._excel_absolute_tolerance_edit.setToolTip("默认 1e-12，必须是大于 0 的有限数值。")
+        excel_settings_first_row.addWidget(self._excel_absolute_tolerance_edit)
+        excel_settings_first_row.addWidget(QLabel("运算目标："))
+        self._excel_operation_targets_edit = QLineEdit()
+        self._excel_operation_targets_edit.setPlaceholderText("0, 1, 10, 100, 1000")
+        self._excel_operation_targets_edit.setToolTip(
+            "用逗号或空格分隔，最多 20 个；连续关系还会检测任意整数目标。"
+        )
+        excel_settings_first_row.addWidget(self._excel_operation_targets_edit, 1)
+        excel_settings_layout.addLayout(excel_settings_first_row)
+
+        excel_settings_second_row = QHBoxLayout()
+        excel_settings_second_row.addWidget(QLabel("连续关系中风险起点："))
+        self._excel_medium_run_spin = QSpinBox()
+        self._excel_medium_run_spin.setRange(2, 20)
+        excel_settings_second_row.addWidget(self._excel_medium_run_spin)
+        excel_settings_second_row.addWidget(QLabel("高风险起点："))
+        self._excel_high_run_spin = QSpinBox()
+        self._excel_high_run_spin.setRange(3, 50)
+        excel_settings_second_row.addWidget(self._excel_high_run_spin)
+        excel_settings_second_row.addWidget(QLabel("统计分布相似始终仅作低风险人工复核提示。"))
+        excel_settings_second_row.addStretch(1)
+        excel_settings_layout.addLayout(excel_settings_second_row)
+        layout.addWidget(excel_settings_group)
+
         self._status = QLabel("请新建或打开项目，然后添加图片、Excel 或文件夹。")
         self._progress = QProgressBar()
         self._progress.setRange(0, 1)
@@ -309,6 +369,11 @@ class MainWindow(QMainWindow):
         self._cancel_button.clicked.connect(self._cancel_scan)
         self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
         self._western_single_band_check.toggled.connect(self._western_settings_changed)
+        self._excel_relative_tolerance_spin.editingFinished.connect(self._excel_settings_changed)
+        self._excel_absolute_tolerance_edit.editingFinished.connect(self._excel_settings_changed)
+        self._excel_operation_targets_edit.editingFinished.connect(self._excel_settings_changed)
+        self._excel_medium_run_spin.editingFinished.connect(self._excel_settings_changed)
+        self._excel_high_run_spin.editingFinished.connect(self._excel_settings_changed)
         self._results.cellClicked.connect(self._show_selected_evidence)
         self._crop_evidence_check.toggled.connect(self._toggle_evidence_crop)
         self._copy_evidence_button.clicked.connect(self._copy_evidence_summary)
@@ -338,12 +403,7 @@ class MainWindow(QMainWindow):
         self._project = Project.create(name)
         self._project_path = Path(path).expanduser().resolve() if path else None
         self._current_result = None
-        self._digit_run_spin.blockSignals(True)
-        self._digit_run_spin.setValue(self._project.minimum_digit_run)
-        self._digit_run_spin.blockSignals(False)
-        self._western_single_band_check.blockSignals(True)
-        self._western_single_band_check.setChecked(self._project.western_single_band_enabled)
-        self._western_single_band_check.blockSignals(False)
+        self._load_project_settings(self._project)
         self._sources.clear()
         self._results.setRowCount(0)
         self._dirty = True
@@ -359,12 +419,7 @@ class MainWindow(QMainWindow):
         self._project = project
         self._project_path = project_path
         self._current_result = project.last_scan_result
-        self._digit_run_spin.blockSignals(True)
-        self._digit_run_spin.setValue(project.minimum_digit_run)
-        self._digit_run_spin.blockSignals(False)
-        self._western_single_band_check.blockSignals(True)
-        self._western_single_band_check.setChecked(project.western_single_band_enabled)
-        self._western_single_band_check.blockSignals(False)
+        self._load_project_settings(project)
         self._dirty = False
         self._sources.clear()
         for source in project.source_paths:
@@ -392,6 +447,30 @@ class MainWindow(QMainWindow):
         self._status.setText(f"项目已保存：{destination}")
         self._update_project_state()
         return destination
+
+    def _load_project_settings(self, project: Project) -> None:
+        controls = (
+            self._digit_run_spin,
+            self._western_single_band_check,
+            self._excel_relative_tolerance_spin,
+            self._excel_absolute_tolerance_edit,
+            self._excel_operation_targets_edit,
+            self._excel_medium_run_spin,
+            self._excel_high_run_spin,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        self._digit_run_spin.setValue(project.minimum_digit_run)
+        self._western_single_band_check.setChecked(project.western_single_band_enabled)
+        self._excel_relative_tolerance_spin.setValue(
+            project.excel_custom_relative_tolerance_percent
+        )
+        self._excel_absolute_tolerance_edit.setText(project.excel_absolute_tolerance)
+        self._excel_operation_targets_edit.setText(", ".join(project.excel_operation_targets))
+        self._excel_medium_run_spin.setValue(project.excel_medium_run_length)
+        self._excel_high_run_spin.setValue(project.excel_high_run_length)
+        for control in controls:
+            control.blockSignals(False)
 
     def export_excel_report(self, path: str | Path) -> Path:
         if self._project is None or self._current_result is None:
@@ -622,6 +701,11 @@ class MainWindow(QMainWindow):
             sources,
             minimum_digit_run,
             western_single_band_enabled,
+            self._project.excel_custom_relative_tolerance_percent,
+            self._project.excel_absolute_tolerance,
+            self._project.excel_operation_targets,
+            self._project.excel_medium_run_length,
+            self._project.excel_high_run_length,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -794,6 +878,36 @@ class MainWindow(QMainWindow):
         self._status.setText(f"Western blot 单条带检测已{state}，原扫描结果已失效。")
 
     @Slot()
+    def _excel_settings_changed(self) -> None:
+        if self._project is None:
+            return
+        targets = tuple(
+            item
+            for item in re.split(r"[,，;；\s]+", self._excel_operation_targets_edit.text().strip())
+            if item
+        )
+        try:
+            updated = self._project.with_excel_analysis_settings(
+                self._excel_relative_tolerance_spin.value(),
+                self._excel_absolute_tolerance_edit.text().strip(),
+                targets,
+                self._excel_medium_run_spin.value(),
+                self._excel_high_run_spin.value(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Excel 参数无效", str(exc))
+            self._load_project_settings(self._project)
+            return
+        if updated == self._project:
+            return
+        self._project = updated
+        self._load_project_settings(updated)
+        self._current_result = None
+        self._render_result(None)
+        self._mark_dirty()
+        self._status.setText("Excel 高级规则参数已更新，原扫描结果已失效。")
+
+    @Slot()
     def _cleanup_worker(self) -> None:
         if self._worker is not None:
             self._worker.deleteLater()
@@ -832,6 +946,14 @@ class MainWindow(QMainWindow):
         self._export_button.setEnabled(self._current_result is not None and not scan_running)
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
         self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
+        for control in (
+            self._excel_relative_tolerance_spin,
+            self._excel_absolute_tolerance_edit,
+            self._excel_operation_targets_edit,
+            self._excel_medium_run_spin,
+            self._excel_high_run_spin,
+        ):
+            control.setEnabled(self._project is not None and not scan_running)
 
     def _confirm_discard_changes(self) -> bool:
         if not self._dirty:
@@ -1023,6 +1145,28 @@ def _excel_evidence_summary_text(finding: Finding) -> str:
             f"连续匹配：{finding.details.get('matched_count', len(paired_values))} 组；"
             f"对齐方式：{finding.details.get('alignment', '-')}。",
         ]
+        if "mismatch_count" in finding.details:
+            lines.append(
+                f"不同位置：{finding.details.get('mismatch_count', '-')}；"
+                f"相似度：{_as_percent(finding.details.get('similarity'))}。"
+            )
+        if "slope" in finding.details:
+            lines.append(
+                f"稳健线性参数：a={finding.details.get('slope', '-')}，"
+                f"b={finding.details.get('intercept', '-')}；"
+                f"离群位置：{finding.details.get('outlier_count', '-')}。"
+            )
+        if "row_count" in finding.details:
+            lines.append(
+                f"重复区域：{finding.details.get('row_count', '-')} 行 × "
+                f"{finding.details.get('column_count', '-')} 列。"
+            )
+        if "distribution_correlation" in finding.details:
+            lines.append(
+                "统计分布：相关系数 "
+                f"{finding.details.get('distribution_correlation', '-')}；"
+                f"标准化平均误差 {finding.details.get('normalized_mae', '-')}。"
+            )
         for pair in paired_values[:12]:
             if not isinstance(pair, dict):
                 continue

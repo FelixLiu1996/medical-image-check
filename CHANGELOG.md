@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-当前开发版本：`0.1.0a7`。
+当前开发版本：`0.1.0a8`。
 
 ### Added
 
@@ -51,6 +51,12 @@
 - 增加中文 A4 PDF 报告，包含总览、完整结果、图像证据、扫描提示和页码。
 - GUI 增加三格式统一报告导出、聚焦匹配区域和复制证据摘要。
 - 增加 ADR-0004，并登记 ReportLab、Pillow、charset-normalizer 及 portable 许可证收集。
+- 增加 Excel 自定义相对/绝对容差、可配置运算目标和连续关系风险阈值。
+- 增加不同单元格完整值的单次加减乘除低风险候选，以及连续序列减/除目标关系。
+- 增加连续数值片段、顺序打乱、少量修改、连续二维区域和 Theil–Sen 稳健线性候选。
+- 增加均值/标准差异常一致及标准化排序分布相似的低风险统计候选。
+- GUI 增加 Excel 高级参数区和扩展证据摘要；三种报告记录本次项目参数。
+- 项目清单升级到版本 5，兼容迁移版本 1–4 并在高级参数变化时使旧结果失效。
 
 ### Changed
 
@@ -59,6 +65,8 @@
 - 扫描算法版本升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`。
 - 项目清单升级到版本 3，`Finding.details` 支持递归 JSON 证据。
 - 项目清单升级到版本 4。
+- 扫描算法版本升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`。
+- 软件版本升级为 `0.1.0a8`。
 
 ## [0.0.0] - 2026-08-25
 
