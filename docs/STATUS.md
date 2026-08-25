@@ -50,13 +50,13 @@
 ## 当前阶段结论
 
 - Western blot 上一阶段已通过 Windows/Linux CI 和 Windows portable 构建及下载校验。
-- 当前本地已完成荧光/病理专项与 GUI/报告贯通，待推送后执行本阶段远程 CI 和 portable 验证。
+- 荧光/病理专项与 GUI/报告已推送，并通过本阶段 Windows/Linux CI、Windows standalone 编译、程序启动冒烟、ZIP 组装和工件上传。
 - 本地扫描算法升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`，软件版本升级为 `0.1.0a6`。
 
 ## 下一步
 
-1. 推送 `0.1.0a6` 并验证 Windows/Linux CI 与 Windows portable 工件。
-2. 获取 Western/荧光/病理正负例验收数据，校准阈值、实验组与连续切片边界。
+1. 获取 Western/荧光/病理正负例验收数据，校准阈值、实验组与连续切片边界。
+2. 继续完善专项证据交互、报告和扫描任务工程能力。
 3. 后续补充 Excel 自定义容差、单次运算、顺序打乱、区域和统计规则。
 4. 在干净 Windows 10/11 实机完成人工 GUI 与样例扫描验收。
 5. 创建并评审基础开发 PR。
@@ -98,3 +98,5 @@
 - GitHub CI Windows/Linux 通过（run `32834918247`）
 - Windows portable `0.1.0a5` 构建、打包冒烟和工件上传通过（run `32834918889`）
 - 下载后的 portable ZIP 通过原始 `.sha256` 文件校验；共 133 个条目，主程序、Qt/OpenCV 运行库和许可证材料齐全
+- 荧光/病理阶段 GitHub CI Windows/Linux 通过（run `32840344162`）
+- Windows portable `0.1.0a6` standalone 构建、程序冒烟、ZIP 组装和上传通过（run `32840344121`）；Actions 工件 `MedicalImageCheck-windows-x64-portable` 为 85,370,794 字节
