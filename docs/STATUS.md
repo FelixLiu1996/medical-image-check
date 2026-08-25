@@ -30,7 +30,7 @@
 ## 进行中
 
 - 推送本轮开发变更并验证 Windows/Linux CI。
-- 手动触发 Windows portable 工作流，验证真实 Windows 构建产物。
+- 通过开发分支 push 触发 Windows portable 工作流，验证真实 Windows 构建产物；工作流进入默认分支后也可手动触发。
 
 ## 下一步
 

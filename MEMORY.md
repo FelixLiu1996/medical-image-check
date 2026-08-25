@@ -43,7 +43,7 @@
 ## 下一步
 
 1. 推送本轮变更并确认 Windows/Linux GitHub CI。
-2. 手动触发、下载并验证 Windows portable 工件。
+2. 通过开发分支 push 触发、下载并验证 Windows portable 工件；合并后可改用手动触发。
 3. 实现局部关键点、裁剪/重叠召回和几何验证。
 4. 增加图像证据预览，并继续 Excel 高级数值规则。
 5. 通过 PR 合并阶段性 Alpha 基线。

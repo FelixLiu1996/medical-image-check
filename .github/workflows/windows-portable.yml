@@ -3,6 +3,7 @@ name: Windows portable package
 on:
   workflow_dispatch:
   push:
+    branches: ["codex/**"]
     tags: ["v*"]
 
 permissions:

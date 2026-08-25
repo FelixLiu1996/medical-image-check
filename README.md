@@ -75,7 +75,7 @@ py -3.12 -m venv .venv
 
 当前界面明确标记为基础开发版，不应作为正式科研结论工具使用。
 
-Windows 免安装包通过 GitHub Actions 的 `Windows portable package` 工作流手动构建。当前产物是 Alpha 测试工件，不是正式 Release。
+Windows 免安装包通过 GitHub Actions 的 `Windows portable package` 工作流构建；当前开发分支推送会触发验证，也保留手动和版本标签入口。当前产物是 Alpha 测试工件，不是正式 Release。
 
 ## 许可证
 
