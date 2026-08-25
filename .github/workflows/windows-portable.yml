@@ -1,0 +1,47 @@
+name: Windows portable package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install locked dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -c requirements/constraints.txt -e ".[dev,package]"
+      - name: Verify source
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m ruff check . && python -m pytest
+      - name: Build standalone directory
+        run: pyside6-deploy -c pysidedeploy.spec --force
+      - name: Verify packaged application
+        run: build\release\MedicalImageCheck.dist\MedicalImageCheck.exe --smoke-test
+      - name: Assemble portable archive
+        shell: pwsh
+        run: |
+          $app = "build/release/MedicalImageCheck.dist"
+          Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES.md $app
+          python scripts/collect_licenses.py "$app/licenses" PySide6_Essentials shiboken6 openpyxl et_xmlfile xlrd numpy opencv-python-headless Nuitka
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "$app/*" -DestinationPath "dist/MedicalImageCheck-windows-x64-portable.zip" -Force
+          $hash = (Get-FileHash "dist/MedicalImageCheck-windows-x64-portable.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  MedicalImageCheck-windows-x64-portable.zip" | Set-Content "dist/MedicalImageCheck-windows-x64-portable.zip.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MedicalImageCheck-windows-x64-portable
+          path: |
+            dist/MedicalImageCheck-windows-x64-portable.zip
+            dist/MedicalImageCheck-windows-x64-portable.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

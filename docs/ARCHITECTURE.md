@@ -7,6 +7,7 @@
 - Python 3.12
 - PySide6 Essentials / Qt Widgets
 - openpyxl、xlrd 和标准库 csv
+- NumPy、opencv-python-headless
 - pytest、Ruff
 - Windows/Linux GitHub Actions
 
@@ -57,13 +58,15 @@
 | Qt UI | `src/medical_image_check/ui/` |
 | 自动化测试 | `tests/` |
 
-当前 `BasicScanService` 已贯通输入收集、图片文件指纹、Excel 数值解析、精确重复结果和 UI 展示。项目清单已经具备 JSON 原子保存，但尚未接入 UI。
+当前 `BasicScanService` 已贯通输入收集、图片文件/解码像素指纹、图片整体近似候选、Excel 数值解析、结果持久化和 UI 展示。项目清单已接入 UI，能够恢复输入路径、最近一次结果、扫描提示和报告路径。Excel 报告通过稳定结果模型导出，不读取检测器内部状态。
+
+Windows Alpha 免安装包使用 `pyside6-deploy`/Nuitka standalone 模式，由独立 GitHub Actions 工作流构建。选择与约束见 `decisions/ADR-0003-windows-portable-nuitka.md`。
 
 ## 尚未决定
 
 - 持久化数据库及迁移框架。
-- 图像索引和近邻检索实现。
+- 局部图像索引和近邻检索实现；当前只有全局感知指纹分段索引。
 - ONNX Runtime 或其他推理运行时的最终选择。
-- 安装器与免安装包实现。
+- 安装器实现；免安装包已建立原型但仍待干净 Windows 环境验证。
 
 这些选择应通过独立 ADR 决定。

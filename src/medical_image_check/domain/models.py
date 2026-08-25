@@ -82,6 +82,8 @@ class ScanResult:
     spreadsheet_count: int
     findings: tuple[Finding, ...]
     issues: tuple[ScanIssue, ...] = ()
+    algorithm_version: str = "exact-baseline-1"
+    completed_at: str | None = None
 
 
 def deterministic_finding_id(rule_id: str, locations: tuple[EvidenceLocation, ...]) -> str:

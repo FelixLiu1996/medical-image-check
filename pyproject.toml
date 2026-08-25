@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medical-image-check"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Local duplicate detection for medical research images and spreadsheet data"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -13,6 +13,8 @@ authors = [
   { name = "Medical Image Check contributors" },
 ]
 dependencies = [
+  "numpy==2.5.2",
+  "opencv-python-headless==4.14.0.94",
   "openpyxl==3.1.5",
   "PySide6_Essentials==6.11.2",
   "xlrd==2.0.2",
@@ -25,12 +27,39 @@ dev = [
   "ruff==0.16.4",
   "xlwt==1.3.0",
 ]
+package = [
+  "Nuitka==4.1.1",
+]
 
 [project.scripts]
 medical-image-check = "medical_image_check.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pyside6-project]
+files = [
+  "main.py",
+  "src/medical_image_check/__init__.py",
+  "src/medical_image_check/__main__.py",
+  "src/medical_image_check/app.py",
+  "src/medical_image_check/domain/__init__.py",
+  "src/medical_image_check/domain/models.py",
+  "src/medical_image_check/domain/project.py",
+  "src/medical_image_check/engines/__init__.py",
+  "src/medical_image_check/engines/excel_exact.py",
+  "src/medical_image_check/engines/image_exact.py",
+  "src/medical_image_check/engines/image_similarity.py",
+  "src/medical_image_check/infrastructure/__init__.py",
+  "src/medical_image_check/infrastructure/images.py",
+  "src/medical_image_check/infrastructure/project_store.py",
+  "src/medical_image_check/infrastructure/spreadsheets.py",
+  "src/medical_image_check/services/__init__.py",
+  "src/medical_image_check/services/basic_scan.py",
+  "src/medical_image_check/services/excel_report.py",
+  "src/medical_image_check/ui/__init__.py",
+  "src/medical_image_check/ui/main_window.py",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"

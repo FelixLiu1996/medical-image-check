@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from medical_image_check.domain.models import ScanResult
@@ -10,15 +11,16 @@ from medical_image_check.engines.excel_exact import (
 )
 from medical_image_check.engines.image_exact import (
     SUPPORTED_IMAGE_EXTENSIONS,
-    ExactImageDuplicateDetector,
 )
+from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 
 ProgressCallback = Callable[[int, int, str], None]
+ALGORITHM_VERSION = "generic-image-baseline-1"
 
 
 class BasicScanService:
     def __init__(self) -> None:
-        self._image_detector = ExactImageDuplicateDetector()
+        self._image_detector = ImageDuplicateDetector()
         self._excel_detector = ExactExcelDuplicateDetector()
 
     def collect_supported_files(self, sources: Iterable[str | Path]) -> tuple[Path, ...]:
@@ -54,7 +56,7 @@ class BasicScanService:
                 progress(completed, total, f"已处理：{path.name}")
 
         if progress:
-            progress(0, total, "正在准备基础扫描")
+            progress(0, total, "正在准备扫描")
 
         image_findings, image_issues = self._image_detector.scan(images, mark_complete)
         excel_findings, excel_issues = self._excel_detector.scan(spreadsheets, mark_complete)
@@ -68,4 +70,6 @@ class BasicScanService:
             spreadsheet_count=len(spreadsheets),
             findings=tuple(findings),
             issues=tuple([*image_issues, *excel_issues]),
+            algorithm_version=ALGORITHM_VERSION,
+            completed_at=datetime.now(UTC).isoformat(),
         )

@@ -27,7 +27,16 @@
 6. 执行干净 Windows 环境冒烟测试。
 7. 发布 GitHub Release。
 
-当前开发分支已实现 Windows/Linux 的 Ruff 和 pytest CI。Windows 安装包、免安装包和许可证材料打包尚未实现。
+当前开发分支已实现 Windows/Linux 的 Ruff 和 pytest CI，并建立独立的 `Windows portable package` 工作流：
+
+1. 安装锁定的运行、测试和 Nuitka 构建依赖。
+2. 运行 Ruff 与 pytest。
+3. 按 `pysidedeploy.spec` 构建 standalone 目录。
+4. 运行打包程序 `--smoke-test`。
+5. 收集项目许可证、第三方登记表及实际 wheel 的许可证文件。
+6. 生成免安装 ZIP、SHA-256 文件并上传为保留 14 天的 Actions 工件。
+
+该工作流目前由手动触发或 `v*` 标签触发，不自动创建 GitHub Release。Windows 安装程序尚未实现，免安装包仍需干净 Windows 10/11 人工验证后才能作为正式发行物。
 
 ## 发布限制
 

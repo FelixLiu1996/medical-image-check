@@ -2,7 +2,7 @@
 
 面向基础医学实验研究团队的 Windows 本地图像与 Excel 原始数据查重工具。
 
-> 当前状态：需求 0.1 已确认，正在开发首个基础版本。
+> 当前状态：需求 0.1 已确认，基础 Alpha 闭环正在持续开发。
 
 GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 
@@ -39,14 +39,17 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 当前开发分支已经具备：
 
 - Python 3.12/PySide6 Essentials 中文桌面骨架；
-- 图片文件 SHA-256 完全重复检测；
+- 项目新建、打开、保存、旧格式迁移和最近扫描结果恢复；
+- 图片文件 SHA-256、跨格式解码像素指纹和整体感知近似候选；
+- 多页 TIFF 逐页处理，以及旋转、翻转、压缩和缩放的全局候选；
 - xlsx、xlsm、xls、csv 数值读取；
 - Excel 完整数值和数值行重复检测；
 - 隐藏工作表扫描、公式缓存缺失提示和损坏文件隔离；
-- 版本化项目清单的保存与读取；
+- 基础 Excel 报告，包含概览、结果、提示和项目输入；
 - Windows/Linux GitHub CI、静态检查和自动化测试。
+- `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
-局部图像重叠、数字片段、近似值、专项医学图像算法、历史库和完整报告仍在后续里程碑。
+当前感知近似只作为中/低风险候选。局部图像重叠、Copy-Move、数字片段、近似值、专项医学图像算法、历史库和 HTML/PDF 完整报告仍在后续里程碑。
 
 ## 本地开发
 
@@ -71,6 +74,8 @@ py -3.12 -m venv .venv
 ```
 
 当前界面明确标记为基础开发版，不应作为正式科研结论工具使用。
+
+Windows 免安装包通过 GitHub Actions 的 `Windows portable package` 工作流手动构建。当前产物是 Alpha 测试工件，不是正式 Release。
 
 ## 许可证
 
