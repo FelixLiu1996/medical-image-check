@@ -211,3 +211,82 @@ def test_main_window_displays_western_blot_evidence(tmp_path: Path) -> None:
 
     window.close()
     app.processEvents()
+
+
+def test_main_window_displays_fluorescence_and_pathology_evidence(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    image = QImage(180, 120, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    assert image.save(str(first))
+    assert image.save(str(second))
+    locations = (EvidenceLocation(str(first)), EvidenceLocation(str(second)))
+    fluorescence = Finding(
+        finding_id="fluorescence-evidence",
+        rule_id="image.fluorescence.merge_component",
+        finding_type=FindingType.NORMAL_RELATION,
+        risk=RiskLevel.LOW,
+        title="荧光单通道与 Merge 成分对应",
+        description="正常关系。",
+        locations=locations,
+        details={
+            "first_region_x": 0,
+            "first_region_y": 0,
+            "first_region_width": 180,
+            "first_region_height": 120,
+            "second_region_x": 0,
+            "second_region_y": 0,
+            "second_region_width": 180,
+            "second_region_height": 120,
+            "relationship_class": "normal_merge_component",
+            "first_inferred_role": "blue",
+            "second_inferred_role": "merge",
+            "first_channel": "blue",
+            "second_channel": "blue",
+            "structure_similarity": 0.96,
+            "foreground_mask_iou": 0.82,
+            "normalized_mutual_information": 0.75,
+            "alignment_shift_x": 1.5,
+            "alignment_shift_y": -2.0,
+        },
+    )
+    pathology = Finding(
+        finding_id="pathology-evidence",
+        rule_id="image.pathology.same_region_different_magnification",
+        finding_type=FindingType.NORMAL_RELATION,
+        risk=RiskLevel.LOW,
+        title="病理图疑似同一区域的不同倍率",
+        description="正常关系。",
+        locations=locations,
+        details={
+            "first_region_x": 10,
+            "first_region_y": 20,
+            "first_region_width": 80,
+            "first_region_height": 60,
+            "second_region_x": 0,
+            "second_region_y": 0,
+            "second_region_width": 180,
+            "second_region_height": 120,
+            "relationship_class": "normal_different_magnification",
+            "structure_similarity": 0.94,
+            "tissue_mask_iou": 0.8,
+            "first_magnification": 10.0,
+            "second_magnification": 40.0,
+            "estimated_scale_ratio": 4.0,
+            "transform_second_to_first": "identity",
+        },
+    )
+    window = MainWindow()
+    window._render_result(ScanResult(2, 2, 0, (fluorescence, pathology)))
+
+    window._show_selected_evidence(0)
+    assert "荧光证据" in window._evidence_summary.text()
+    assert "前景重叠 82.0%" in window._evidence_summary.text()
+    window._show_selected_evidence(1)
+    assert window._first_evidence._region == (10, 20, 80, 60)
+    assert "病理证据" in window._evidence_summary.text()
+    assert "倍率 10.0× / 40.0×" in window._evidence_summary.text()
+
+    window.close()
+    app.processEvents()

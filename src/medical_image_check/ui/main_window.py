@@ -722,6 +722,29 @@ def _evidence_summary_text(finding: Finding) -> str:
             f"极性 {details.get('first_polarity', '-')} / "
             f"{details.get('second_polarity', '-')}。"
         )
+    if finding.rule_id.startswith("image.fluorescence."):
+        return (
+            f"荧光证据：关系 {_relationship_label(details.get('relationship_class'))}；"
+            f"角色 {_image_role_label(details.get('first_inferred_role'))} / "
+            f"{_image_role_label(details.get('second_inferred_role'))}；"
+            f"匹配通道 {_image_role_label(details.get('first_channel'))} / "
+            f"{_image_role_label(details.get('second_channel'))}；"
+            f"结构 {_as_percent(details.get('structure_similarity'))}；"
+            f"前景重叠 {_as_percent(details.get('foreground_mask_iou'))}；"
+            f"互信息 {_as_percent(details.get('normalized_mutual_information'))}；"
+            f"配准位移 ({details.get('alignment_shift_x', '-')}, "
+            f"{details.get('alignment_shift_y', '-')})。"
+        )
+    if finding.rule_id.startswith("image.pathology."):
+        return (
+            f"病理证据：关系 {_relationship_label(details.get('relationship_class'))}；"
+            f"组织结构 {_as_percent(details.get('structure_similarity'))}；"
+            f"组织掩膜重叠 {_as_percent(details.get('tissue_mask_iou'))}；"
+            f"倍率 {details.get('first_magnification') or '-'}× / "
+            f"{details.get('second_magnification') or '-'}×；"
+            f"估算尺度比 {details.get('estimated_scale_ratio', '-')}；"
+            f"变换 {details.get('transform_second_to_first', '-')}。"
+        )
     if finding.rule_id != "image.local.geometric":
         return f"{finding.title}：{finding.description}"
     return (
@@ -735,6 +758,30 @@ def _evidence_summary_text(finding: Finding) -> str:
         f"缩放：{details.get('scale_x_second_to_first', '-')} × "
         f"{details.get('scale_y_second_to_first', '-')}。"
     )
+
+
+def _relationship_label(value: object) -> str:
+    labels = {
+        "normal_merge_component": "单通道与合并图正常关系",
+        "normal_same_field_channels": "不同通道同视野正常关系",
+        "suspected_same_channel_reuse": "同通道疑似复用",
+        "normal_different_magnification": "不同倍率正常关系",
+        "suspected_pathology_reuse": "组织区域疑似复用",
+    }
+    return labels.get(str(value), str(value or "-"))
+
+
+def _image_role_label(value: object) -> str:
+    labels = {
+        "blue": "蓝色通道",
+        "green": "绿色通道",
+        "red": "红色通道",
+        "far_red": "远红通道",
+        "gray": "灰度通道",
+        "merge": "合并图",
+        "unknown": "未识别",
+    }
+    return labels.get(str(value), str(value or "-"))
 
 
 def _excel_evidence_summary_text(finding: Finding) -> str:

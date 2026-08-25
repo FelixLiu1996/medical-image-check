@@ -46,6 +46,8 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - 双图并排证据预览、两侧匹配矩形及匹配点/内点/覆盖率/几何变换说明；
 - Western blot 明暗极性归一化、横向条带/面板候选、分段索引，以及条带结构、排列几何和背景纹理联合验证；
 - Western blot 同图面板 Copy-Move 与跨图曝光/翻转候选，单条带敏感检测可独立启用；
+- 荧光图 DAPI/FITC/RFP/Cy5 等通道识别、同视野配准、单通道与 Merge 成分关系，以及同通道高一致复用候选；
+- 普通病理图光密度组织掩膜、多尺度局部区域匹配、倍率识别，以及不同倍率正常关系分类；
 - xlsx、xlsm、xls、csv 数值读取；
 - Excel 完整数值和数值行重复检测；
 - Excel 连续数字片段、近似值及连续列固定倍数、偏移、目标和/积检测；
@@ -55,7 +57,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
-当前整体感知、局部几何、Western blot、Excel 近似和关系结果均需人工复核。Western blot 复杂多面板拆分、任意区域擦除/拼接，通用单图 Copy-Move，Excel 自定义容差/单次运算/顺序打乱/统计异常，荧光/病理专项算法、历史库和 HTML/PDF 完整报告仍在后续里程碑。
+当前整体感知、局部几何、Western blot、荧光、病理、Excel 近似和关系结果均需人工复核。Western blot 复杂多面板拆分、任意区域擦除/拼接，荧光实验组语义，病理连续切片语义，通用单图 Copy-Move，Excel 自定义容差/单次运算/顺序打乱/统计异常，历史库和 HTML/PDF 完整报告仍在后续里程碑。
 
 ## 本地开发
 

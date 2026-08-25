@@ -121,3 +121,64 @@ def test_excel_report_contains_structured_western_blot_evidence(tmp_path: Path) 
     details = json.loads(workbook["查重结果"]["K2"].value)
     assert "图像证据" in details["first_bands"]
     workbook.close()
+
+
+def test_excel_report_contains_fluorescence_and_pathology_evidence(tmp_path: Path) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    locations = (EvidenceLocation(str(first)), EvidenceLocation(str(second)))
+    fluorescence = Finding(
+        finding_id="fluorescence-1",
+        rule_id="image.fluorescence.merge_component",
+        finding_type=FindingType.NORMAL_RELATION,
+        risk=RiskLevel.LOW,
+        title="荧光单通道与 Merge 成分对应",
+        description="正常关系。",
+        locations=locations,
+        details={
+            "evidence_kind": "fluorescence",
+            "relationship_class": "normal_merge_component",
+            "first_channel": "blue",
+            "second_channel": "blue",
+            "structure_similarity": 0.96,
+            "foreground_mask_iou": 0.82,
+            "normalized_mutual_information": 0.75,
+            "alignment_shift_x": 1.5,
+            "alignment_shift_y": -2.0,
+        },
+    )
+    pathology = Finding(
+        finding_id="pathology-1",
+        rule_id="image.pathology.same_region_different_magnification",
+        finding_type=FindingType.NORMAL_RELATION,
+        risk=RiskLevel.LOW,
+        title="病理图疑似同一区域的不同倍率",
+        description="正常关系。",
+        locations=locations,
+        details={
+            "evidence_kind": "pathology",
+            "relationship_class": "normal_different_magnification",
+            "structure_similarity": 0.94,
+            "tissue_mask_iou": 0.8,
+            "first_magnification": 10.0,
+            "second_magnification": 40.0,
+            "estimated_scale_ratio": 4.0,
+            "first_tissue_fraction": 0.65,
+            "second_tissue_fraction": 0.72,
+        },
+    )
+    result = ScanResult(2, 2, 0, (fluorescence, pathology))
+
+    output = ExcelReportExporter().export(result, tmp_path / "specialized-report.xlsx")
+    workbook = load_workbook(output, read_only=True)
+    evidence = workbook["图像证据"]
+
+    assert evidence["R2"].value == "荧光"
+    assert evidence["T2"].value == "蓝色通道"
+    assert evidence["V2"].value == 0.75
+    assert evidence["W2"].value == "1.5, -2.0"
+    assert evidence["R3"].value == "病理"
+    assert evidence["X3"].value == 10.0
+    assert evidence["Y3"].value == 40.0
+    assert evidence["Z3"].value == 4.0
+    workbook.close()

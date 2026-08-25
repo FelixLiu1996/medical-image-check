@@ -32,6 +32,27 @@ REVIEW_LABELS = {
     ReviewStatus.NORMAL: "正常关联",
     ReviewStatus.FALSE_POSITIVE: "误报",
 }
+EVIDENCE_KIND_LABELS = {
+    "western_blot": "Western blot",
+    "fluorescence": "荧光",
+    "pathology": "病理",
+}
+RELATIONSHIP_LABELS = {
+    "normal_merge_component": "单通道与合并图正常关系",
+    "normal_same_field_channels": "不同通道同视野正常关系",
+    "suspected_same_channel_reuse": "同通道疑似复用",
+    "normal_different_magnification": "不同倍率正常关系",
+    "suspected_pathology_reuse": "组织区域疑似复用",
+}
+CHANNEL_LABELS = {
+    "blue": "蓝色通道",
+    "green": "绿色通道",
+    "red": "红色通道",
+    "far_red": "远红通道",
+    "gray": "灰度通道",
+    "merge": "合并图",
+    "unknown": "未识别",
+}
 
 
 class ExcelReportExporter:
@@ -154,10 +175,25 @@ class ExcelReportExporter:
                 "掩膜重叠率",
                 "变换",
                 "单条带模式",
+                "证据类型",
+                "关系分类",
+                "通道 1",
+                "通道 2",
+                "归一化互信息",
+                "配准位移",
+                "倍率 1",
+                "倍率 2",
+                "估算尺度比",
+                "组织占比 1",
+                "组织占比 2",
             ]
         )
         for finding in result.findings:
-            if not finding.rule_id.startswith("image.western_blot."):
+            evidence_kind = finding.details.get("evidence_kind")
+            if not (
+                finding.rule_id.startswith("image.western_blot.")
+                or evidence_kind in {"western_blot", "fluorescence", "pathology"}
+            ):
                 continue
             details = finding.details
             locations = list(finding.locations)
@@ -177,16 +213,74 @@ class ExcelReportExporter:
                     details.get("structure_similarity", ""),
                     details.get("geometry_similarity", ""),
                     details.get("background_similarity", ""),
-                    details.get("band_mask_iou", ""),
+                    details.get(
+                        "band_mask_iou",
+                        details.get(
+                            "foreground_mask_iou",
+                            details.get("tissue_mask_iou", ""),
+                        ),
+                    ),
                     details.get("transform_second_to_first", ""),
                     "是" if details.get("single_band_mode") else "否",
+                    EVIDENCE_KIND_LABELS.get(
+                        str(evidence_kind or "western_blot"),
+                        str(evidence_kind or "western_blot"),
+                    ),
+                    RELATIONSHIP_LABELS.get(
+                        str(details.get("relationship_class", "")),
+                        str(details.get("relationship_class", "")),
+                    ),
+                    CHANNEL_LABELS.get(
+                        str(details.get("first_channel", "")),
+                        str(details.get("first_channel", "")),
+                    ),
+                    CHANNEL_LABELS.get(
+                        str(details.get("second_channel", "")),
+                        str(details.get("second_channel", "")),
+                    ),
+                    details.get("normalized_mutual_information", ""),
+                    _alignment_shift_text(details),
+                    details.get("first_magnification", ""),
+                    details.get("second_magnification", ""),
+                    details.get("estimated_scale_ratio", ""),
+                    details.get("first_tissue_fraction", ""),
+                    details.get("second_tissue_fraction", ""),
                 ]
             )
         worksheet.freeze_panes = "A2"
         worksheet.auto_filter.ref = worksheet.dimensions
         _format_sheet(
             worksheet,
-            (22, 34, 48, 24, 24, 12, 48, 24, 24, 12, 14, 18, 18, 18, 14, 20, 14),
+            (
+                22,
+                34,
+                48,
+                24,
+                24,
+                12,
+                48,
+                24,
+                24,
+                12,
+                14,
+                18,
+                18,
+                18,
+                14,
+                20,
+                14,
+                16,
+                30,
+                12,
+                12,
+                18,
+                18,
+                12,
+                12,
+                14,
+                14,
+                14,
+            ),
         )
 
     @staticmethod
@@ -328,3 +422,11 @@ def _region_text(details: dict, prefix: str) -> str:
     if any(value is None for value in values):
         return ""
     return ", ".join(str(value) for value in values)
+
+
+def _alignment_shift_text(details: dict) -> str:
+    horizontal = details.get("alignment_shift_x")
+    vertical = details.get("alignment_shift_y")
+    if horizontal is None and vertical is None:
+        return ""
+    return f"{horizontal or 0}, {vertical or 0}"
