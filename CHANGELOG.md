@@ -64,6 +64,7 @@
 ### Changed
 
 - PRD 0.1 由待评审更新为已确认的初版开发基线。
+- 将强制逐条人工复核调整为后续可选的轻量算法反馈，并在用户报告的 Alpha 体验问题修复完成前暂缓开发。
 - 输入路径变化时使旧扫描结果失效，防止报告与当前输入不一致。
 - 扫描算法版本升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`。
 - 项目清单升级到版本 3，`Finding.details` 支持递归 JSON 证据。
