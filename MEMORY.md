@@ -76,6 +76,7 @@
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - `0.1.0a9` Qt offscreen 首页、图片和数据工作区截图检查通过；图片页使用可滚动工作区避免低高度窗口挤掉导航。
 - `0.1.0a9` wheel、打包程序三报告冒烟和 `pyside6-deploy --dry-run` 本地通过。
+- 双入口 GUI 源码 CI Windows/Linux run `32862204165` 通过；Windows portable run `32862205003` 完成 standalone、打包程序三报告冒烟、许可证收集、ZIP 组装和上传，总耗时 24 分 39 秒，工件 92.3 MB，artifact digest `9507b3b0998fb51cde1e48bdd1da1a880735ffd38a1dbe1583a47652edd7fd23`。
 - Python wheel 构建与源码编译检查：通过。
 - GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32834918247`）。
 - Windows portable：`0.1.0a5` 在 Windows runner 构建、打包冒烟和工件上传通过（run `32834918889`）。

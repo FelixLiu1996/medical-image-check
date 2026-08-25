@@ -113,6 +113,8 @@
 - Python wheel 构建与源码编译检查通过
 - `0.1.0a9` Qt offscreen 首页/图片/数据三页截图检查通过；900px 高窗口顶部导航稳定，工作区可滚动
 - `medical_image_check-0.1.0a9-py3-none-any.whl` 隔离临时目录构建通过；本地打包冒烟与 `pyside6-deploy --dry-run` 通过
+- 双入口 GUI 源码 CI Windows/Linux run `32862204165` 通过。
+- Windows portable `0.1.0a9` run `32862205003` 完成 standalone、打包程序三报告冒烟、许可证收集、ZIP 组装和上传，总耗时 24 分 39 秒；工件 92.3 MB，artifact digest 为 `9507b3b0998fb51cde1e48bdd1da1a880735ffd38a1dbe1583a47652edd7fd23`。
 - 2000 项×96 描述子的局部候选层合成微基准约 2.9 秒、进程峰值 RSS 约 304 MiB（不代表端到端扫描）
 - 20,000 个 11 位合成数值：片段规则约 1.6 秒/53,000 条候选，高级关系约 0.8 秒/8,000 条候选，峰值约 225 MiB（不代表真实分布）
 - 80,000 个合成数值单元格（10,000 行 × 8 列）：`excel-advanced-2` 新规则约 3.3 秒、最大 RSS 约 95 MiB，单次运算达到 300 条保护上限（不含读取、旧规则和报告）
