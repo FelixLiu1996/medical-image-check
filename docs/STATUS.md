@@ -59,16 +59,16 @@
 
 - Western blot 上一阶段已通过 Windows/Linux CI 和 Windows portable 构建及下载校验。
 - 荧光/病理专项与 GUI/报告已推送，并通过本阶段 Windows/Linux CI、Windows standalone 编译、程序启动冒烟、ZIP 组装和工件上传。
-- 当前本地已完成扫描控制、三格式报告和证据交互，待推送后执行本阶段远程 CI 与 portable 验证。
+- 扫描控制、三格式报告和证据交互已推送；远程发现并修复 Windows OpenCV 测试夹具直接写中文路径的问题，产品读取链路不受影响。
+- 本阶段 Windows/Linux CI、Windows standalone 编译、打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均已通过。
 - 扫描算法仍为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-1`，软件版本升级为 `0.1.0a7`。
 
 ## 下一步
 
-1. 推送 `0.1.0a7` 并验证 Windows/Linux CI、Windows portable 和三种报告依赖打包。
-2. 获取 Western/荧光/病理正负例验收数据，校准阈值、实验组与连续切片边界。
-3. 后续补充 Excel 自定义容差、单次运算、顺序打乱、区域和统计规则。
-4. 设计持久化任务断点、崩溃恢复和历史库，不把进程内暂停误称为断点续扫。
-5. 在干净 Windows 10/11 实机验收 GUI、暂停/取消、三种报告和 PDF 字体/打印。
+1. 获取 Western/荧光/病理正负例验收数据，校准阈值、实验组与连续切片边界。
+2. 后续补充 Excel 自定义容差、单次运算、顺序打乱、区域和统计规则。
+3. 设计持久化任务断点、崩溃恢复和历史库，不把进程内暂停误称为断点续扫。
+4. 在干净 Windows 10/11 实机验收 GUI、暂停/取消、三种报告和 PDF 字体/打印。
 
 ## 阻塞或待定
 
@@ -114,3 +114,5 @@
 - Windows portable `0.1.0a6` standalone 构建、程序冒烟、ZIP 组装和上传通过（run `32840344121`）；Actions 工件 `MedicalImageCheck-windows-x64-portable` 为 85,370,794 字节
 - 扫描控制、HTML/PDF 报告和 GUI 证据交互本地 74 项测试通过；PDF 两页中文样例通过 Poppler 全页渲染目视检查和 pypdf 文本层验证
 - ReportLab、Pillow、charset-normalizer 的实际 wheel 许可证收集通过
+- 扫描控制与三格式报告阶段 GitHub CI Windows/Linux 通过（run `32844253484`）
+- Windows portable `0.1.0a7` standalone 构建和打包程序三报告冒烟通过（run `32844253505`，总耗时 22 分 18 秒）；Actions 工件 `MedicalImageCheck-windows-x64-portable` 为 92.1 MB，artifact digest 为 `63d43c1488b5798e28ceccc57185617c3e4ad4c688868658fdf8fc52e6068e74`

@@ -54,11 +54,10 @@
 
 ## 下一步
 
-1. 推送 `0.1.0a7`，等待并核验 Windows/Linux CI 与 Windows portable 的三种报告依赖。
-2. 使用授权 Western/荧光/病理正负例调优阈值、实验组和连续切片边界。
-3. 后续补齐未完成 Excel 规则与参数界面。
-4. 设计持久化任务断点、崩溃恢复和历史库。
-5. 在干净 Windows 10/11 实机验证 GUI、暂停/取消、三种报告和 PDF 字体/打印。
+1. 使用授权 Western/荧光/病理正负例调优阈值、实验组和连续切片边界。
+2. 后续补齐未完成 Excel 规则与参数界面。
+3. 设计持久化任务断点、崩溃恢复和历史库。
+4. 在干净 Windows 10/11 实机验证 GUI、暂停/取消、三种报告和 PDF 字体/打印。
 
 ## 验证状态
 
@@ -87,3 +86,4 @@
 - 扫描控制：暂停/继续线程事件和首文件后取消的合成测试通过；UI 按钮和取消前结果保留路径已接入。
 - HTML：单文件内嵌 PNG、搜索/风险筛选、无网络资源及源图不变测试通过。
 - PDF：两页中文样例通过 Poppler 全页渲染目视检查，标题/结果/图像证据/扫描提示文本层经 pypdf 验证可检索；ReportLab/Pillow/charset-normalizer 许可证收集通过。
+- 远程验收：GitHub CI Windows/Linux run `32844253484` 通过；Windows portable run `32844253505` 完成 standalone、打包 EXE 三报告冒烟、许可证收集和上传，工件 92.1 MB，artifact digest `63d43c1488b5798e28ceccc57185617c3e4ad4c688868658fdf8fc52e6068e74`。
