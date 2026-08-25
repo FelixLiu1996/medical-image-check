@@ -39,6 +39,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 当前开发分支已经具备：
 
 - Python 3.12/PySide6 Essentials 中文桌面骨架；
+- 现代化中文浅色首页，以及相互独立的图片查重、数据查重入口和文件类型过滤；
 - 项目新建、打开、保存、旧格式迁移和最近扫描结果恢复；
 - 后台扫描安全暂停、继续和取消；取消不会用未完成结果覆盖上一次完整扫描；
 - 图片文件 SHA-256、跨格式解码像素指纹和整体感知近似候选；
@@ -83,7 +84,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m medical_image_check
 ```
 
-当前界面明确标记为基础开发版，不应作为正式科研结论工具使用。
+当前界面可供团队进行 Alpha 体验，但检测结果仍必须人工复核，不应作为正式科研结论直接使用。
 
 Windows 免安装包通过 GitHub Actions 的 `Windows portable package` 工作流构建；当前开发分支推送会触发验证，也保留手动和版本标签入口。当前产物是 Alpha 测试工件，不是正式 Release。
 

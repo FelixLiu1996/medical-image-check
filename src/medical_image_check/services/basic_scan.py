@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from threading import Event
 
@@ -26,6 +27,12 @@ ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
     "generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2"
 )
+
+
+class ScanMode(StrEnum):
+    ALL = "all"
+    IMAGE = "image"
+    DATA = "data"
 
 
 class ScanCancelled(Exception):
@@ -77,19 +84,27 @@ class BasicScanService:
         excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS,
         excel_medium_run_length: int = DEFAULT_EXCEL_MEDIUM_RUN_LENGTH,
         excel_high_run_length: int = DEFAULT_EXCEL_HIGH_RUN_LENGTH,
+        scan_mode: ScanMode | str = ScanMode.ALL,
     ) -> None:
-        excel_settings = ExcelAnalysisSettings.from_values(
-            excel_custom_relative_tolerance_percent,
-            excel_absolute_tolerance,
-            excel_operation_targets,
-            excel_medium_run_length,
-            excel_high_run_length,
+        self.scan_mode = ScanMode(scan_mode)
+        self._image_detector = (
+            ImageDuplicateDetector(western_single_band_enabled)
+            if self.scan_mode != ScanMode.DATA
+            else None
         )
-        self._image_detector = ImageDuplicateDetector(western_single_band_enabled)
-        self._excel_detector = ExactExcelDuplicateDetector(
-            minimum_digit_run=minimum_digit_run,
-            analysis_settings=excel_settings,
-        )
+        self._excel_detector = None
+        if self.scan_mode != ScanMode.IMAGE:
+            excel_settings = ExcelAnalysisSettings.from_values(
+                excel_custom_relative_tolerance_percent,
+                excel_absolute_tolerance,
+                excel_operation_targets,
+                excel_medium_run_length,
+                excel_high_run_length,
+            )
+            self._excel_detector = ExactExcelDuplicateDetector(
+                minimum_digit_run=minimum_digit_run,
+                analysis_settings=excel_settings,
+            )
 
     def collect_supported_files(
         self,
@@ -97,7 +112,12 @@ class BasicScanService:
         checkpoint: Callable[[], None] | None = None,
     ) -> tuple[Path, ...]:
         collected: set[Path] = set()
-        supported = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_SPREADSHEET_EXTENSIONS
+        if self.scan_mode == ScanMode.IMAGE:
+            supported = SUPPORTED_IMAGE_EXTENSIONS
+        elif self.scan_mode == ScanMode.DATA:
+            supported = SUPPORTED_SPREADSHEET_EXTENSIONS
+        else:
+            supported = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_SPREADSHEET_EXTENSIONS
         for raw_source in sources:
             if checkpoint:
                 checkpoint()
@@ -138,19 +158,25 @@ class BasicScanService:
         if progress:
             progress(0, total, "正在准备扫描")
 
-        image_findings, image_issues = self._image_detector.scan(
-            images,
-            mark_complete,
-            scan_control.checkpoint,
-        )
+        image_findings, image_issues = ([], [])
+        if self.scan_mode != ScanMode.DATA:
+            assert self._image_detector is not None
+            image_findings, image_issues = self._image_detector.scan(
+                images,
+                mark_complete,
+                scan_control.checkpoint,
+            )
         scan_control.checkpoint()
-        if progress and images:
+        if progress and images and self.scan_mode == ScanMode.ALL:
             progress(completed, total, "图片候选验证完成，正在处理表格")
-        excel_findings, excel_issues = self._excel_detector.scan(
-            spreadsheets,
-            mark_complete,
-            scan_control.checkpoint,
-        )
+        excel_findings, excel_issues = ([], [])
+        if self.scan_mode != ScanMode.IMAGE:
+            assert self._excel_detector is not None
+            excel_findings, excel_issues = self._excel_detector.scan(
+                spreadsheets,
+                mark_complete,
+                scan_control.checkpoint,
+            )
         scan_control.checkpoint()
         if progress:
             progress(completed, total, "正在整理扫描结果")

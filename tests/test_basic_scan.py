@@ -10,6 +10,7 @@ from medical_image_check.services.basic_scan import (
     BasicScanService,
     ScanCancelled,
     ScanControl,
+    ScanMode,
 )
 
 
@@ -62,6 +63,40 @@ def test_corrupt_workbook_does_not_abort_other_files(tmp_path: Path) -> None:
     assert result.issues[0].source_path == str(corrupt)
     assert first.read_bytes() == second.read_bytes()
     assert corrupt.read_bytes() == b"not-an-excel-archive"
+
+
+def test_basic_scan_mode_filters_files_and_skips_other_detector(tmp_path: Path) -> None:
+    image = np.arange(32 * 32, dtype=np.uint8).reshape(32, 32)
+    first_image = tmp_path / "one.png"
+    assert cv2.imwrite(str(first_image), image)
+    (tmp_path / "two.png").write_bytes(first_image.read_bytes())
+
+    workbook = Workbook()
+    workbook.active.append([2.5, 3.5])
+    workbook.active.append([2.5, 3.5])
+    workbook.save(tmp_path / "data.xlsx")
+
+    image_result = BasicScanService(scan_mode=ScanMode.IMAGE).scan([tmp_path])
+    data_result = BasicScanService(scan_mode=ScanMode.DATA).scan([tmp_path])
+
+    assert (
+        image_result.source_count,
+        image_result.image_count,
+        image_result.spreadsheet_count,
+    ) == (
+        2,
+        2,
+        0,
+    )
+    assert image_result.findings
+    assert all(finding.rule_id.startswith("image.") for finding in image_result.findings)
+    assert (data_result.source_count, data_result.image_count, data_result.spreadsheet_count) == (
+        1,
+        0,
+        1,
+    )
+    assert data_result.findings
+    assert all(finding.rule_id.startswith("excel.") for finding in data_result.findings)
 
 
 def test_basic_scan_uses_configured_digit_fragment_length(tmp_path: Path) -> None:

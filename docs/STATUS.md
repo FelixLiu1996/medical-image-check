@@ -58,6 +58,9 @@
 - 实现 Theil–Sen 稳健线性关系，以及均值/标准差异常一致和标准化分布相似的固定低风险统计提示。
 - GUI 增加 Excel 高级参数区和扩展证据摘要，参数随项目保存并写入 Excel/HTML/PDF 报告。
 - 项目清单升级为版本 5 并兼容版本 1–4；Excel 参数变化使旧扫描结果失效。
+- 将单页混合界面重构为现代化中文首页、图片查重工作区和数据查重工作区。
+- 图片/数据工作区分别过滤直接文件、文件夹内容、参数和结果证据；项目操作降为可选辅助能力。
+- 扫描服务增加 `all/image/data` 模式，单一工作区会跳过另一类检测器且保持旧调用兼容。
 
 ## 当前阶段结论
 
@@ -66,7 +69,7 @@
 - 扫描控制、三格式报告和证据交互已推送；远程发现并修复 Windows OpenCV 测试夹具直接写中文路径的问题，产品读取链路不受影响。
 - 本阶段 Windows/Linux CI、Windows standalone 编译、打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均已通过。
 - Excel 已确认数值规则的全局扫描 Alpha 基线已补齐；自动识别实验组与手动框选尚未进入当前 GUI。
-- 扫描算法升级为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`，软件版本升级为 `0.1.0a8`。
+- 扫描算法保持 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`，双入口界面版本升级为 `0.1.0a9`。
 - 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
 
 ## 下一步
@@ -103,11 +106,13 @@
 - Python 3.12.13
 - Ruff 检查与格式检查通过
 - `pip check` 通过
-- pytest 89 项通过
+- pytest 91 项通过；新增图片/数据模式隔离和 GUI 文件类型过滤测试
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过
 - Python wheel 构建与源码编译检查通过
+- `0.1.0a9` Qt offscreen 首页/图片/数据三页截图检查通过；900px 高窗口顶部导航稳定，工作区可滚动
+- `medical_image_check-0.1.0a9-py3-none-any.whl` 隔离临时目录构建通过；本地打包冒烟与 `pyside6-deploy --dry-run` 通过
 - 2000 项×96 描述子的局部候选层合成微基准约 2.9 秒、进程峰值 RSS 约 304 MiB（不代表端到端扫描）
 - 20,000 个 11 位合成数值：片段规则约 1.6 秒/53,000 条候选，高级关系约 0.8 秒/8,000 条候选，峰值约 225 MiB（不代表真实分布）
 - 80,000 个合成数值单元格（10,000 行 × 8 列）：`excel-advanced-2` 新规则约 3.3 秒、最大 RSS 约 95 MiB，单次运算达到 300 条保护上限（不含读取、旧规则和报告）

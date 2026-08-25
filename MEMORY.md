@@ -26,7 +26,9 @@
 - ADR-0004 记录 HTML/PDF 方案；ReportLab、Pillow、charset-normalizer 已登记并加入 portable 许可证收集。
 - 打包程序 `--smoke-test` 会实际生成并校验 Excel、HTML、PDF 三种临时报告，Windows portable 必须通过该路径。
 - Excel 全局扫描已支持自定义相对/绝对容差、单次与连续四则运算、连续片段、乱序、少量修改、二维区域、Theil–Sen 稳健线性和固定低风险统计提示；GUI、项目恢复和三种报告已贯通参数与证据。
-- 本地开发版本为 `0.1.0a8`，扫描算法版本为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`。
+- GUI 已重构为现代化中文首页、图片查重和数据查重两个独立工作区；直接文件、文件夹内容、参数、结果和证据均按模式隔离，项目保存为可选辅助功能。
+- 扫描服务支持 `all/image/data` 模式，图片或数据工作区会跳过另一套检测器；界面模式不写入项目 schema，旧项目按已有输入和结果自动选择工作区。
+- 本地开发版本为 `0.1.0a9`，扫描算法版本为 `generic-image-local-1+western-blot-1+fluorescence-1+pathology-1+excel-advanced-2`。
 
 ## 已确认的重要方向
 
@@ -67,11 +69,13 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：89 项通过。
+- `pytest`：91 项通过，包含图片/数据模式隔离和 GUI 文件类型过滤。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
+- `0.1.0a9` Qt offscreen 首页、图片和数据工作区截图检查通过；图片页使用可滚动工作区避免低高度窗口挤掉导航。
+- `0.1.0a9` wheel、打包程序三报告冒烟和 `pyside6-deploy --dry-run` 本地通过。
 - Python wheel 构建与源码编译检查：通过。
 - GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32834918247`）。
 - Windows portable：`0.1.0a5` 在 Windows runner 构建、打包冒烟和工件上传通过（run `32834918889`）。

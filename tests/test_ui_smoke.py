@@ -11,6 +11,7 @@ from medical_image_check.domain.models import (
     RiskLevel,
     ScanResult,
 )
+from medical_image_check.services.basic_scan import ScanMode
 from medical_image_check.ui.main_window import MainWindow
 
 
@@ -18,11 +19,42 @@ def test_main_window_can_be_created_offscreen() -> None:
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
 
-    assert "医学实验图像与数据查重" in window.windowTitle()
+    assert "科研数据查重助手" in window.windowTitle()
+    assert window._pages.currentWidget() is window._home_page
     assert window._pause_button.text() == "暂停"
     assert not window._pause_button.isEnabled()
     assert not window._cancel_button.isEnabled()
 
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_separates_image_and_data_workspaces(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    image = tmp_path / "source.png"
+    image.write_bytes(b"image-placeholder")
+    workbook = tmp_path / "values.xlsx"
+    workbook.write_bytes(b"workbook-placeholder")
+
+    window = MainWindow()
+    window._set_scan_mode(ScanMode.IMAGE)
+    window._append_sources([str(image), str(workbook)])
+
+    assert window._sources.count() == 1
+    assert window._sources.item(0).text() == str(image.resolve())
+    assert not window._image_settings_group.isHidden()
+    assert window._excel_settings_group.isHidden()
+
+    window._set_scan_mode(ScanMode.DATA)
+    window._append_sources([str(workbook), str(image)])
+
+    assert window._sources.count() == 1
+    assert window._sources.item(0).text() == str(workbook.resolve())
+    assert window._image_settings_group.isHidden()
+    assert not window._excel_settings_group.isHidden()
+    assert window._evidence_images_container.isHidden()
+
+    window._dirty = False
     window.close()
     app.processEvents()
 
@@ -176,6 +208,7 @@ def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> N
         },
     )
     window = MainWindow()
+    window._set_scan_mode(ScanMode.DATA)
     window._render_result(ScanResult(1, 0, 1, (finding,)))
 
     window._show_selected_evidence(0)

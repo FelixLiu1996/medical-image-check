@@ -16,10 +16,12 @@ from PySide6.QtGui import (
     QPen,
 )
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -30,7 +32,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -39,23 +43,100 @@ from PySide6.QtWidgets import (
 
 from medical_image_check.domain.models import EvidenceLocation, Finding, RiskLevel, ScanResult
 from medical_image_check.domain.project import Project
+from medical_image_check.engines.excel_exact import SUPPORTED_SPREADSHEET_EXTENSIONS
 from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
 from medical_image_check.services.basic_scan import (
     BasicScanService,
     ScanCancelled,
     ScanControl,
+    ScanMode,
 )
 from medical_image_check.services.excel_report import ExcelReportExporter
 from medical_image_check.services.html_report import HtmlReportExporter
 from medical_image_check.services.pdf_report import PdfReportExporter
 
 PROJECT_FILTER = "医学查重项目 (*.mic-project.json)"
+IMAGE_FILE_FILTER = "支持的图片 (*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff)"
+DATA_FILE_FILTER = "支持的表格 (*.xlsx *.xls *.xlsm *.csv)"
 RISK_LABELS = {
     RiskLevel.HIGH: "高",
     RiskLevel.MEDIUM: "中",
     RiskLevel.LOW: "低",
 }
+
+MAIN_WINDOW_STYLE = """
+QMainWindow, QWidget#appRoot {
+    background: #f5f7fb;
+    color: #172033;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-size: 13px;
+}
+QFrame#topBar, QFrame#homeHero, QFrame#modeCard, QGroupBox {
+    background: #ffffff;
+    border: 1px solid #e4e9f2;
+    border-radius: 12px;
+}
+QFrame#topBar { border-radius: 14px; }
+QFrame#modeCard { min-height: 210px; }
+QGroupBox {
+    margin-top: 12px;
+    padding: 14px 12px 10px 12px;
+    font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 6px;
+    color: #33415c;
+}
+QPushButton {
+    min-height: 32px;
+    padding: 0 14px;
+    border: 1px solid #d7dfeb;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #26344d;
+}
+QPushButton:hover { background: #f1f5ff; border-color: #8aa9e8; }
+QPushButton:pressed { background: #e7efff; }
+QPushButton:disabled { color: #9ca8ba; background: #f5f7fa; border-color: #e7ebf1; }
+QPushButton[role="primary"] {
+    background: #356ae6;
+    color: #ffffff;
+    border-color: #356ae6;
+    font-weight: 600;
+}
+QPushButton[role="primary"]:hover { background: #2859cc; border-color: #2859cc; }
+QPushButton[role="nav"] { border: 0; background: transparent; font-weight: 600; }
+QPushButton[role="nav"]:checked { background: #e8efff; color: #2457c5; }
+QListWidget, QTableWidget, QLineEdit, QSpinBox, QDoubleSpinBox {
+    background: #ffffff;
+    border: 1px solid #dce3ed;
+    border-radius: 7px;
+    selection-background-color: #dce8ff;
+    selection-color: #172033;
+}
+QListWidget { padding: 6px; }
+QLineEdit, QSpinBox, QDoubleSpinBox { min-height: 30px; padding: 0 6px; }
+QHeaderView::section {
+    background: #f3f6fb;
+    color: #53627a;
+    border: 0;
+    border-bottom: 1px solid #dfe5ef;
+    padding: 8px;
+    font-weight: 600;
+}
+QProgressBar {
+    border: 0;
+    border-radius: 5px;
+    background: #e8edf5;
+    min-height: 10px;
+    max-height: 10px;
+    text-align: center;
+}
+QProgressBar::chunk { background: #4b7bec; border-radius: 5px; }
+"""
 
 
 class ImageEvidenceView(QWidget):
@@ -159,6 +240,7 @@ class ScanWorker(QObject):
         excel_operation_targets: tuple[str, ...],
         excel_medium_run_length: int,
         excel_high_run_length: int,
+        scan_mode: ScanMode,
     ) -> None:
         super().__init__()
         self._sources = sources
@@ -169,6 +251,7 @@ class ScanWorker(QObject):
         self._excel_operation_targets = excel_operation_targets
         self._excel_medium_run_length = excel_medium_run_length
         self._excel_high_run_length = excel_high_run_length
+        self._scan_mode = scan_mode
         self.control = ScanControl()
 
     @Slot()
@@ -184,6 +267,7 @@ class ScanWorker(QObject):
                 excel_operation_targets=self._excel_operation_targets,
                 excel_medium_run_length=self._excel_medium_run_length,
                 excel_high_run_length=self._excel_high_run_length,
+                scan_mode=self._scan_mode,
             ).scan(self._sources, self.progress.emit, self.control)
         except ScanCancelled:
             self.cancelled.emit()
@@ -197,11 +281,13 @@ class ScanWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.resize(1180, 820)
+        self.resize(1280, 900)
+        self.setMinimumSize(1024, 720)
         self._thread: QThread | None = None
         self._worker: ScanWorker | None = None
         self._project: Project | None = None
         self._project_path: Path | None = None
+        self._scan_mode = ScanMode.IMAGE
         self._current_result: ScanResult | None = None
         self._result_before_scan: ScanResult | None = None
         self._rendered_findings: list[Finding] = []
@@ -217,146 +303,67 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self._build_menu()
         central = QWidget(self)
+        central.setObjectName("appRoot")
         layout = QVBoxLayout(central)
+        layout.setContentsMargins(22, 18, 22, 20)
+        layout.setSpacing(14)
 
-        title = QLabel("医学实验图像与数据查重")
-        title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        subtitle = QLabel("当前 Alpha 支持三种本地报告、图像专项候选及可调参数的 Excel 全局查重。")
-        subtitle.setStyleSheet("color: #666;")
+        top_bar = QFrame()
+        top_bar.setObjectName("topBar")
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(18, 14, 18, 14)
+        brand_layout = QVBoxLayout()
+        brand_layout.setSpacing(2)
+        title = QLabel("科研数据查重助手")
+        title.setStyleSheet("font-size: 20px; font-weight: 700; color: #172033;")
+        subtitle = QLabel("医学基础实验图片与表格的本地重复检测")
+        subtitle.setStyleSheet("color: #718096;")
+        brand_layout.addWidget(title)
+        brand_layout.addWidget(subtitle)
+        top_bar_layout.addLayout(brand_layout)
+        top_bar_layout.addStretch(1)
+
+        self._home_nav_button = QPushButton("首页")
+        self._image_nav_button = QPushButton("图片查重")
+        self._data_nav_button = QPushButton("数据查重")
+        for button in (
+            self._home_nav_button,
+            self._image_nav_button,
+            self._data_nav_button,
+        ):
+            button.setCheckable(True)
+            button.setProperty("role", "nav")
+            top_bar_layout.addWidget(button)
+
+        top_bar_layout.addSpacing(10)
+        self._new_project_button = QPushButton("新建")
+        self._new_project_button.setToolTip("新建一个可保存的查重项目")
+        self._open_project_button = QPushButton("打开")
+        self._open_project_button.setToolTip("打开以前保存的项目")
+        self._save_button = QPushButton("保存")
+        self._save_button.setToolTip("保存当前输入、参数和最近结果")
+        self._export_button = QPushButton("导出报告")
+        self._export_button.setProperty("role", "primary")
+        top_bar_layout.addWidget(self._new_project_button)
+        top_bar_layout.addWidget(self._open_project_button)
+        top_bar_layout.addWidget(self._save_button)
+        top_bar_layout.addWidget(self._export_button)
+        layout.addWidget(top_bar)
+
         self._project_label = QLabel()
-        self._project_label.setStyleSheet("color: #1f4e78; font-weight: 600;")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        self._project_label.setStyleSheet("color: #60708a; padding-left: 4px;")
         layout.addWidget(self._project_label)
 
-        project_actions = QHBoxLayout()
-        self._new_project_button = QPushButton("新建项目")
-        self._open_project_button = QPushButton("打开项目")
-        self._save_button = QPushButton("保存项目")
-        self._export_button = QPushButton("导出报告…")
-        project_actions.addWidget(self._new_project_button)
-        project_actions.addWidget(self._open_project_button)
-        project_actions.addWidget(self._save_button)
-        project_actions.addWidget(self._export_button)
-        project_actions.addStretch(1)
-        layout.addLayout(project_actions)
+        self._pages = QStackedWidget()
+        self._home_page = self._build_home_page()
+        self._workspace_page = self._build_workspace_page()
+        self._pages.addWidget(self._home_page)
+        self._pages.addWidget(self._workspace_page)
+        layout.addWidget(self._pages, 1)
 
-        actions = QHBoxLayout()
-        self._add_files_button = QPushButton("添加文件")
-        self._add_folder_button = QPushButton("添加文件夹")
-        self._clear_sources_button = QPushButton("清空输入")
-        self._scan_button = QPushButton("开始扫描")
-        self._scan_button.setStyleSheet("font-weight: 600;")
-        self._pause_button = QPushButton("暂停")
-        self._pause_button.setEnabled(False)
-        self._cancel_button = QPushButton("取消")
-        self._cancel_button.setEnabled(False)
-        actions.addWidget(self._add_files_button)
-        actions.addWidget(self._add_folder_button)
-        actions.addWidget(self._clear_sources_button)
-        actions.addStretch(1)
-        actions.addWidget(self._scan_button)
-        actions.addWidget(self._pause_button)
-        actions.addWidget(self._cancel_button)
-        layout.addLayout(actions)
-
-        self._sources = QListWidget()
-        self._sources.setMinimumHeight(120)
-        layout.addWidget(self._sources)
-
-        scan_settings = QHBoxLayout()
-        scan_settings.addWidget(QLabel("连续数字片段最短报警位数："))
-        self._digit_run_spin = QSpinBox()
-        self._digit_run_spin.setRange(3, 12)
-        self._digit_run_spin.setValue(4)
-        self._digit_run_spin.setToolTip("默认 4 位；数值越小召回越多，低风险结果也会明显增加。")
-        scan_settings.addWidget(self._digit_run_spin)
-        self._western_single_band_check = QCheckBox("检测 Western blot 单条带相似")
-        self._western_single_band_check.setToolTip(
-            "默认关闭；单条带自然相似较常见，启用后只生成低风险人工复核候选。"
-        )
-        scan_settings.addWidget(self._western_single_band_check)
-        scan_settings.addStretch(1)
-        layout.addLayout(scan_settings)
-
-        excel_settings_group = QGroupBox("Excel 高级规则参数")
-        excel_settings_layout = QVBoxLayout(excel_settings_group)
-        excel_settings_first_row = QHBoxLayout()
-        excel_settings_first_row.addWidget(QLabel("自定义相对容差："))
-        self._excel_relative_tolerance_spin = QDoubleSpinBox()
-        self._excel_relative_tolerance_spin.setRange(0, 100)
-        self._excel_relative_tolerance_spin.setDecimals(4)
-        self._excel_relative_tolerance_spin.setSingleStep(0.01)
-        self._excel_relative_tolerance_spin.setSuffix(" %")
-        self._excel_relative_tolerance_spin.setToolTip(
-            "0 表示仅使用内置 0.01%、0.1%、1% 档位；非零值也用于变换关系容差。"
-        )
-        excel_settings_first_row.addWidget(self._excel_relative_tolerance_spin)
-        excel_settings_first_row.addWidget(QLabel("绝对容差："))
-        self._excel_absolute_tolerance_edit = QLineEdit()
-        self._excel_absolute_tolerance_edit.setMaximumWidth(150)
-        self._excel_absolute_tolerance_edit.setToolTip("默认 1e-12，必须是大于 0 的有限数值。")
-        excel_settings_first_row.addWidget(self._excel_absolute_tolerance_edit)
-        excel_settings_first_row.addWidget(QLabel("运算目标："))
-        self._excel_operation_targets_edit = QLineEdit()
-        self._excel_operation_targets_edit.setPlaceholderText("0, 1, 10, 100, 1000")
-        self._excel_operation_targets_edit.setToolTip(
-            "用逗号或空格分隔，最多 20 个；连续关系还会检测任意整数目标。"
-        )
-        excel_settings_first_row.addWidget(self._excel_operation_targets_edit, 1)
-        excel_settings_layout.addLayout(excel_settings_first_row)
-
-        excel_settings_second_row = QHBoxLayout()
-        excel_settings_second_row.addWidget(QLabel("连续关系中风险起点："))
-        self._excel_medium_run_spin = QSpinBox()
-        self._excel_medium_run_spin.setRange(2, 20)
-        excel_settings_second_row.addWidget(self._excel_medium_run_spin)
-        excel_settings_second_row.addWidget(QLabel("高风险起点："))
-        self._excel_high_run_spin = QSpinBox()
-        self._excel_high_run_spin.setRange(3, 50)
-        excel_settings_second_row.addWidget(self._excel_high_run_spin)
-        excel_settings_second_row.addWidget(QLabel("统计分布相似始终仅作低风险人工复核提示。"))
-        excel_settings_second_row.addStretch(1)
-        excel_settings_layout.addLayout(excel_settings_second_row)
-        layout.addWidget(excel_settings_group)
-
-        self._status = QLabel("请新建或打开项目，然后添加图片、Excel 或文件夹。")
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 1)
-        self._progress.setValue(0)
-        layout.addWidget(self._status)
-        layout.addWidget(self._progress)
-
-        self._results = QTableWidget(0, 4)
-        self._results.setHorizontalHeaderLabels(["风险", "类型", "说明", "位置"])
-        self._results.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self._results, 1)
-
-        evidence_group = QGroupBox("结果证据预览")
-        evidence_layout = QVBoxLayout(evidence_group)
-        self._evidence_images_container = QWidget()
-        evidence_images = QHBoxLayout(self._evidence_images_container)
-        evidence_images.setContentsMargins(0, 0, 0, 0)
-        self._first_evidence = ImageEvidenceView()
-        self._second_evidence = ImageEvidenceView()
-        evidence_images.addWidget(self._first_evidence, 1)
-        evidence_images.addWidget(self._second_evidence, 1)
-        self._evidence_summary = QLabel("选择一条结果后显示图像或数值证据。")
-        self._evidence_summary.setWordWrap(True)
-        self._evidence_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        evidence_actions = QHBoxLayout()
-        self._crop_evidence_check = QCheckBox("聚焦匹配区域")
-        self._crop_evidence_check.setEnabled(False)
-        self._copy_evidence_button = QPushButton("复制证据摘要")
-        self._copy_evidence_button.setEnabled(False)
-        evidence_actions.addWidget(self._crop_evidence_check)
-        evidence_actions.addWidget(self._copy_evidence_button)
-        evidence_actions.addStretch(1)
-        evidence_layout.addWidget(self._evidence_images_container)
-        evidence_layout.addWidget(self._evidence_summary)
-        evidence_layout.addLayout(evidence_actions)
-        layout.addWidget(evidence_group)
-
+        self._home_nav_button.clicked.connect(self._show_home)
+        self._image_nav_button.clicked.connect(lambda: self._set_scan_mode(ScanMode.IMAGE))
+        self._data_nav_button.clicked.connect(lambda: self._set_scan_mode(ScanMode.DATA))
         self._new_project_button.clicked.connect(self._new_project_dialog)
         self._open_project_button.clicked.connect(self._open_project_dialog)
         self._save_button.clicked.connect(self._save_current_project)
@@ -378,6 +385,345 @@ class MainWindow(QMainWindow):
         self._crop_evidence_check.toggled.connect(self._toggle_evidence_crop)
         self._copy_evidence_button.clicked.connect(self._copy_evidence_summary)
         self.setCentralWidget(central)
+        self.setStyleSheet(MAIN_WINDOW_STYLE)
+        self._show_home()
+
+    def _build_home_page(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 4, 0, 0)
+        page_layout.setSpacing(16)
+
+        hero = QFrame()
+        hero.setObjectName("homeHero")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(28, 24, 28, 24)
+        hero_title = QLabel("选择要检查的内容")
+        hero_title.setStyleSheet("font-size: 25px; font-weight: 700;")
+        hero_text = QLabel(
+            "图片和表格使用独立工作区。直接选择文件或文件夹即可开始，项目保存是可选的辅助功能。"
+        )
+        hero_text.setStyleSheet("font-size: 14px; color: #66758c;")
+        hero_text.setWordWrap(True)
+        hero_layout.addWidget(hero_title)
+        hero_layout.addWidget(hero_text)
+        page_layout.addWidget(hero)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(16)
+        cards.addWidget(
+            self._build_mode_card(
+                "图片查重",
+                "检查完全重复、近似图片、局部重叠，以及 Western blot、荧光图和病理图专项候选。",
+                "JPG · PNG · BMP · WebP · TIFF",
+                "进入图片查重",
+                ScanMode.IMAGE,
+            ),
+            1,
+        )
+        cards.addWidget(
+            self._build_mode_card(
+                "数据查重",
+                "检查表格中的完整数值、连续片段、近似值、固定变换、运算关系和结构相似。",
+                "XLSX · XLS · XLSM · CSV",
+                "进入数据查重",
+                ScanMode.DATA,
+            ),
+            1,
+        )
+        page_layout.addLayout(cards, 1)
+        note = QLabel(
+            "所有核心检测均在本机完成，不会修改原始文件。当前结果是人工复核候选，不自动等同于科研结论。"
+        )
+        note.setStyleSheet("color: #718096; padding: 4px;")
+        note.setWordWrap(True)
+        page_layout.addWidget(note)
+        return page
+
+    def _build_mode_card(
+        self,
+        title: str,
+        description: str,
+        formats: str,
+        button_text: str,
+        mode: ScanMode,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("modeCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(24, 24, 24, 24)
+        card_layout.setSpacing(12)
+        card_title = QLabel(title)
+        card_title.setStyleSheet("font-size: 21px; font-weight: 700; color: #20304d;")
+        card_description = QLabel(description)
+        card_description.setWordWrap(True)
+        card_description.setStyleSheet("font-size: 14px; color: #5f6f87;")
+        card_formats = QLabel(formats)
+        card_formats.setStyleSheet("color: #356ae6; font-weight: 600;")
+        entry_button = QPushButton(button_text)
+        entry_button.setProperty("role", "primary")
+        entry_button.setMinimumHeight(40)
+        entry_button.clicked.connect(lambda: self._set_scan_mode(mode))
+        card_layout.addWidget(card_title)
+        card_layout.addWidget(card_description)
+        card_layout.addWidget(card_formats)
+        card_layout.addStretch(1)
+        card_layout.addWidget(entry_button)
+        return card
+
+    def _build_workspace_page(self) -> QWidget:
+        content = QWidget()
+        content.setObjectName("appRoot")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        workspace_header = QHBoxLayout()
+        workspace_text = QVBoxLayout()
+        workspace_text.setSpacing(2)
+        self._mode_title = QLabel()
+        self._mode_title.setStyleSheet("font-size: 23px; font-weight: 700;")
+        self._mode_subtitle = QLabel()
+        self._mode_subtitle.setStyleSheet("color: #66758c;")
+        self._mode_subtitle.setWordWrap(True)
+        workspace_text.addWidget(self._mode_title)
+        workspace_text.addWidget(self._mode_subtitle)
+        workspace_header.addLayout(workspace_text)
+        workspace_header.addStretch(1)
+        layout.addLayout(workspace_header)
+
+        self._input_group = QGroupBox()
+        input_layout = QVBoxLayout(self._input_group)
+        actions = QHBoxLayout()
+        self._add_files_button = QPushButton("添加文件")
+        self._add_files_button.setProperty("role", "primary")
+        self._add_folder_button = QPushButton("添加文件夹")
+        self._clear_sources_button = QPushButton("清空输入")
+        self._scan_button = QPushButton("开始扫描")
+        self._scan_button.setProperty("role", "primary")
+        self._pause_button = QPushButton("暂停")
+        self._pause_button.setEnabled(False)
+        self._cancel_button = QPushButton("取消")
+        self._cancel_button.setEnabled(False)
+        actions.addWidget(self._add_files_button)
+        actions.addWidget(self._add_folder_button)
+        actions.addWidget(self._clear_sources_button)
+        actions.addStretch(1)
+        actions.addWidget(self._scan_button)
+        actions.addWidget(self._pause_button)
+        actions.addWidget(self._cancel_button)
+        input_layout.addLayout(actions)
+
+        self._sources_label = QLabel()
+        self._sources_label.setStyleSheet("color: #718096;")
+        input_layout.addWidget(self._sources_label)
+        self._sources = QListWidget()
+        self._sources.setMinimumHeight(78)
+        self._sources.setMaximumHeight(120)
+        input_layout.addWidget(self._sources)
+        layout.addWidget(self._input_group)
+
+        self._image_settings_group = QGroupBox("图片检测设置")
+        image_settings = QHBoxLayout(self._image_settings_group)
+        self._western_single_band_check = QCheckBox("检测 Western blot 单条带相似")
+        self._western_single_band_check.setToolTip(
+            "默认关闭；单条带自然相似较常见，启用后只生成低风险人工复核候选。"
+        )
+        image_settings.addWidget(self._western_single_band_check)
+        image_settings.addWidget(QLabel("默认同时检测通用图片、Western blot、荧光图和普通病理图。"))
+        image_settings.addStretch(1)
+        layout.addWidget(self._image_settings_group)
+
+        self._excel_settings_group = QGroupBox("数据检测设置")
+        excel_settings_layout = QVBoxLayout(self._excel_settings_group)
+        excel_settings_first_row = QHBoxLayout()
+        excel_settings_first_row.addWidget(QLabel("数字片段最短报警位数："))
+        self._digit_run_spin = QSpinBox()
+        self._digit_run_spin.setRange(3, 12)
+        self._digit_run_spin.setValue(4)
+        self._digit_run_spin.setToolTip("默认 4 位；数值越小召回越多，低风险结果也会明显增加。")
+        excel_settings_first_row.addWidget(self._digit_run_spin)
+        excel_settings_first_row.addWidget(QLabel("自定义相对容差："))
+        self._excel_relative_tolerance_spin = QDoubleSpinBox()
+        self._excel_relative_tolerance_spin.setRange(0, 100)
+        self._excel_relative_tolerance_spin.setDecimals(4)
+        self._excel_relative_tolerance_spin.setSingleStep(0.01)
+        self._excel_relative_tolerance_spin.setSuffix(" %")
+        self._excel_relative_tolerance_spin.setToolTip(
+            "0 表示仅使用内置 0.01%、0.1%、1% 档位；非零值也用于变换关系容差。"
+        )
+        excel_settings_first_row.addWidget(self._excel_relative_tolerance_spin)
+        excel_settings_first_row.addWidget(QLabel("绝对容差："))
+        self._excel_absolute_tolerance_edit = QLineEdit()
+        self._excel_absolute_tolerance_edit.setMaximumWidth(150)
+        self._excel_absolute_tolerance_edit.setToolTip("默认 1e-12，必须是大于 0 的有限数值。")
+        excel_settings_first_row.addWidget(self._excel_absolute_tolerance_edit)
+        excel_settings_first_row.addStretch(1)
+        excel_settings_layout.addLayout(excel_settings_first_row)
+
+        excel_settings_second_row = QHBoxLayout()
+        excel_settings_second_row.addWidget(QLabel("运算目标："))
+        self._excel_operation_targets_edit = QLineEdit()
+        self._excel_operation_targets_edit.setPlaceholderText("0, 1, 10, 100, 1000")
+        self._excel_operation_targets_edit.setToolTip(
+            "用逗号或空格分隔，最多 20 个；连续关系还会检测任意整数目标。"
+        )
+        excel_settings_second_row.addWidget(self._excel_operation_targets_edit, 1)
+
+        excel_settings_second_row.addWidget(QLabel("连续关系中风险起点："))
+        self._excel_medium_run_spin = QSpinBox()
+        self._excel_medium_run_spin.setRange(2, 20)
+        excel_settings_second_row.addWidget(self._excel_medium_run_spin)
+        excel_settings_second_row.addWidget(QLabel("高风险起点："))
+        self._excel_high_run_spin = QSpinBox()
+        self._excel_high_run_spin.setRange(3, 50)
+        excel_settings_second_row.addWidget(self._excel_high_run_spin)
+        excel_settings_second_row.addWidget(QLabel("统计分布相似始终仅作低风险人工复核提示。"))
+        excel_settings_layout.addLayout(excel_settings_second_row)
+        layout.addWidget(self._excel_settings_group)
+
+        self._status = QLabel()
+        self._status.setWordWrap(True)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 1)
+        self._progress.setValue(0)
+        self._progress.setTextVisible(False)
+        layout.addWidget(self._status)
+        layout.addWidget(self._progress)
+
+        self._results_group = QGroupBox("候选结果")
+        results_layout = QVBoxLayout(self._results_group)
+        self._results = QTableWidget(0, 4)
+        self._results.setHorizontalHeaderLabels(["风险", "类型", "说明", "位置"])
+        self._results.horizontalHeader().setStretchLastSection(True)
+        self._results.verticalHeader().setVisible(False)
+        self._results.setAlternatingRowColors(True)
+        self._results.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._results.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._results.setMinimumHeight(150)
+        results_layout.addWidget(self._results)
+
+        self._evidence_group = QGroupBox("结果证据预览")
+        evidence_layout = QVBoxLayout(self._evidence_group)
+        self._evidence_images_container = QWidget()
+        evidence_images = QHBoxLayout(self._evidence_images_container)
+        evidence_images.setContentsMargins(0, 0, 0, 0)
+        self._first_evidence = ImageEvidenceView()
+        self._second_evidence = ImageEvidenceView()
+        evidence_images.addWidget(self._first_evidence, 1)
+        evidence_images.addWidget(self._second_evidence, 1)
+        self._evidence_summary = QLabel("选择一条结果后显示图像或数值证据。")
+        self._evidence_summary.setWordWrap(True)
+        self._evidence_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        evidence_actions = QHBoxLayout()
+        self._crop_evidence_check = QCheckBox("聚焦匹配区域")
+        self._crop_evidence_check.setEnabled(False)
+        self._copy_evidence_button = QPushButton("复制证据摘要")
+        self._copy_evidence_button.setEnabled(False)
+        evidence_actions.addWidget(self._crop_evidence_check)
+        evidence_actions.addWidget(self._copy_evidence_button)
+        evidence_actions.addStretch(1)
+        evidence_layout.addWidget(self._evidence_images_container)
+        evidence_layout.addWidget(self._evidence_summary)
+        evidence_layout.addLayout(evidence_actions)
+        result_evidence_layout = QHBoxLayout()
+        result_evidence_layout.setSpacing(10)
+        result_evidence_layout.addWidget(self._results_group, 3)
+        result_evidence_layout.addWidget(self._evidence_group, 2)
+        layout.addLayout(result_evidence_layout, 1)
+        page = QScrollArea()
+        page.setFrameShape(QFrame.Shape.NoFrame)
+        page.setWidgetResizable(True)
+        page.setWidget(content)
+        return page
+
+    @Slot()
+    def _show_home(self) -> None:
+        if self._thread is not None:
+            return
+        self._pages.setCurrentWidget(self._home_page)
+        self._home_nav_button.setChecked(True)
+        self._image_nav_button.setChecked(False)
+        self._data_nav_button.setChecked(False)
+
+    def _set_scan_mode(self, mode: ScanMode) -> None:
+        if self._thread is not None:
+            return
+        self._scan_mode = mode
+        self._pages.setCurrentWidget(self._workspace_page)
+        is_image = mode == ScanMode.IMAGE
+        self._home_nav_button.setChecked(False)
+        self._image_nav_button.setChecked(is_image)
+        self._data_nav_button.setChecked(not is_image)
+        self._image_settings_group.setVisible(is_image)
+        self._excel_settings_group.setVisible(not is_image)
+        if is_image:
+            self._mode_title.setText("图片查重")
+            self._mode_subtitle.setText(
+                "只处理常规静态图片；检测完全重复、近似、局部重叠及三类医学专项候选。"
+            )
+            self._input_group.setTitle("选择要检查的图片")
+            self._add_files_button.setText("添加图片")
+            self._add_folder_button.setText("添加图片文件夹")
+            self._scan_button.setText("开始图片查重")
+            self._results_group.setTitle("图片候选结果")
+            self._evidence_group.setTitle("双图证据预览")
+            self._sources_label.setText(
+                "支持 JPG、JPEG、PNG、BMP、WebP、TIFF；文件夹会自动忽略表格。"
+            )
+        else:
+            self._mode_title.setText("数据查重")
+            self._mode_subtitle.setText(
+                "只处理 Excel/CSV 的数值内容；文本、日期和空白默认不参与比较。"
+            )
+            self._input_group.setTitle("选择要检查的表格")
+            self._add_files_button.setText("添加表格")
+            self._add_folder_button.setText("添加表格文件夹")
+            self._scan_button.setText("开始数据查重")
+            self._results_group.setTitle("数据候选结果")
+            self._evidence_group.setTitle("数值证据预览")
+            self._sources_label.setText("支持 XLSX、XLS、XLSM、CSV；文件夹会自动忽略图片。")
+        self._refresh_source_list()
+        self._render_result(self._current_result)
+        count = self._sources.count()
+        noun = "图片输入" if is_image else "表格输入"
+        self._status.setText(
+            f"当前有 {count} 个{noun}路径，可继续添加后开始扫描。"
+            if count
+            else f"请添加{noun}；无需先创建或保存项目。"
+        )
+        self._update_project_state()
+
+    def _refresh_source_list(self) -> None:
+        self._sources.clear()
+        if self._project is None:
+            return
+        for source in self._project.source_paths:
+            if self._source_matches_mode(source):
+                self._sources.addItem(source)
+
+    def _source_matches_mode(self, source: str | Path) -> bool:
+        path = Path(source)
+        if path.is_dir() or not path.suffix:
+            return True
+        if self._scan_mode == ScanMode.IMAGE:
+            return path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        return path.suffix.lower() in SUPPORTED_SPREADSHEET_EXTENSIONS
+
+    @staticmethod
+    def _infer_project_mode(project: Project) -> ScanMode:
+        image_count = sum(
+            Path(source).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+            for source in project.source_paths
+        )
+        data_count = sum(
+            Path(source).suffix.lower() in SUPPORTED_SPREADSHEET_EXTENSIONS
+            for source in project.source_paths
+        )
+        if project.last_scan_result is not None:
+            image_count += project.last_scan_result.image_count
+            data_count += project.last_scan_result.spreadsheet_count
+        return ScanMode.DATA if data_count > image_count else ScanMode.IMAGE
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
@@ -404,10 +750,11 @@ class MainWindow(QMainWindow):
         self._project_path = Path(path).expanduser().resolve() if path else None
         self._current_result = None
         self._load_project_settings(self._project)
-        self._sources.clear()
-        self._results.setRowCount(0)
+        self._refresh_source_list()
+        self._render_result(None)
         self._dirty = True
-        self._status.setText("项目已创建，请添加实验图片、表格或文件夹。")
+        kind = "图片" if self._scan_mode == ScanMode.IMAGE else "表格"
+        self._status.setText(f"项目已创建，请添加要检查的{kind}或文件夹。")
         if self._project_path is not None:
             self._save_current_project(silent=True)
         self._update_project_state()
@@ -421,9 +768,8 @@ class MainWindow(QMainWindow):
         self._current_result = project.last_scan_result
         self._load_project_settings(project)
         self._dirty = False
-        self._sources.clear()
-        for source in project.source_paths:
-            self._sources.addItem(source)
+        self._set_scan_mode(self._infer_project_mode(project))
+        self._refresh_source_list()
         self._render_result(project.last_scan_result)
         result_count = len(project.last_scan_result.findings) if project.last_scan_result else 0
         self._status.setText(
@@ -473,9 +819,10 @@ class MainWindow(QMainWindow):
             control.blockSignals(False)
 
     def export_excel_report(self, path: str | Path) -> Path:
-        if self._project is None or self._current_result is None:
+        result = self._result_for_active_mode()
+        if self._project is None or result is None or not self._active_result_available():
             raise ValueError("请先完成或打开一次扫描结果")
-        output = self._report_exporter.export(self._current_result, path, self._project)
+        output = self._report_exporter.export(result, path, self._project)
         self._project = self._project.with_report(output)
         self._dirty = True
         if self._project_path is not None:
@@ -485,16 +832,18 @@ class MainWindow(QMainWindow):
         return output
 
     def export_html_report(self, path: str | Path) -> Path:
-        if self._project is None or self._current_result is None:
+        result = self._result_for_active_mode()
+        if self._project is None or result is None or not self._active_result_available():
             raise ValueError("请先完成或打开一次扫描结果")
-        output = self._html_report_exporter.export(self._current_result, path, self._project)
+        output = self._html_report_exporter.export(result, path, self._project)
         self._record_report(output, "HTML")
         return output
 
     def export_pdf_report(self, path: str | Path) -> Path:
-        if self._project is None or self._current_result is None:
+        result = self._result_for_active_mode()
+        if self._project is None or result is None or not self._active_result_available():
             raise ValueError("请先完成或打开一次扫描结果")
-        output = self._pdf_report_exporter.export(self._current_result, path, self._project)
+        output = self._pdf_report_exporter.export(result, path, self._project)
         self._record_report(output, "PDF")
         return output
 
@@ -581,7 +930,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _export_excel_report_dialog(self) -> None:
-        if self._current_result is None:
+        if not self._active_result_available():
             QMessageBox.information(self, "没有扫描结果", "请先完成扫描或打开已有结果的项目。")
             return
         project_name = self._project.name if self._project else "查重"
@@ -602,7 +951,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _export_report_dialog(self) -> None:
-        if self._current_result is None:
+        if not self._active_result_available():
             QMessageBox.information(self, "没有扫描结果", "请先完成扫描或打开已有结果的项目。")
             return
         project_name = self._project.name if self._project else "查重"
@@ -630,51 +979,65 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _select_files(self) -> None:
+        is_image = self._scan_mode == ScanMode.IMAGE
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "选择实验图片或表格",
+            "选择要检查的图片" if is_image else "选择要检查的表格",
             "",
-            "支持的文件 (*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff *.xlsx *.xls *.xlsm *.csv)",
+            IMAGE_FILE_FILTER if is_image else DATA_FILE_FILTER,
         )
         self._append_sources(paths)
 
     @Slot()
     def _select_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "选择包含实验数据的文件夹")
+        kind = "图片" if self._scan_mode == ScanMode.IMAGE else "表格"
+        path = QFileDialog.getExistingDirectory(self, f"选择包含{kind}的文件夹")
         if path:
             self._append_sources([path])
 
     def _append_sources(self, paths: list[str]) -> None:
         if not paths:
             return
+        normalized_paths = [str(Path(path).expanduser().resolve()) for path in paths]
+        accepted = [path for path in normalized_paths if self._source_matches_mode(path)]
+        rejected_count = len(normalized_paths) - len(accepted)
+        if not accepted:
+            kind = "图片" if self._scan_mode == ScanMode.IMAGE else "Excel/CSV 表格"
+            self._status.setText(f"未添加文件：当前工作区只接受{kind}。")
+            return
         if self._project is None:
-            self.create_project("未命名项目")
-        existing = {self._sources.item(index).text() for index in range(self._sources.count())}
+            name = "未命名图片查重" if self._scan_mode == ScanMode.IMAGE else "未命名数据查重"
+            self.create_project(name)
+        existing = set(self._project.source_paths) if self._project else set()
         added: list[str] = []
-        for path in paths:
-            normalized = str(Path(path).expanduser().resolve())
-            if normalized not in existing:
-                self._sources.addItem(normalized)
-                existing.add(normalized)
-                added.append(normalized)
+        for path in accepted:
+            if path not in existing:
+                existing.add(path)
+                added.append(path)
         if added and self._project is not None:
             self._project = self._project.with_sources(added)
             self._current_result = None
+            self._refresh_source_list()
             self._render_result(None)
             self._mark_dirty()
-            self._status.setText(f"已添加 {len(added)} 个输入路径，原扫描结果已失效。")
+            suffix = f"；另有 {rejected_count} 个不匹配类型已忽略" if rejected_count else ""
+            self._status.setText(f"已添加 {len(added)} 个输入路径{suffix}，原扫描结果已失效。")
+        elif rejected_count:
+            self._status.setText(f"有 {rejected_count} 个不匹配当前工作区的文件已忽略。")
 
     @Slot()
     def _clear_sources(self) -> None:
         if self._sources.count() == 0:
             return
-        self._sources.clear()
         if self._project is not None:
-            self._project = self._project.replace_sources([])
+            visible = {self._sources.item(index).text() for index in range(self._sources.count())}
+            remaining = [source for source in self._project.source_paths if source not in visible]
+            self._project = self._project.replace_sources(remaining)
             self._current_result = None
+            self._refresh_source_list()
             self._render_result(None)
             self._mark_dirty()
-        self._status.setText("输入已清空。")
+        self._status.setText("当前工作区的输入已清空。")
 
     @Slot()
     def _start_scan(self) -> None:
@@ -706,6 +1069,7 @@ class MainWindow(QMainWindow):
             self._project.excel_operation_targets,
             self._project.excel_medium_run_length,
             self._project.excel_high_run_length,
+            self._scan_mode,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -781,6 +1145,8 @@ class MainWindow(QMainWindow):
         if result is None:
             return
         for finding in result.findings:
+            if not self._finding_matches_mode(finding):
+                continue
             self._rendered_findings.append(finding)
             row = self._results.rowCount()
             self._results.insertRow(row)
@@ -793,6 +1159,48 @@ class MainWindow(QMainWindow):
             ]
             for column, value in enumerate(values):
                 self._results.setItem(row, column, QTableWidgetItem(value))
+
+    def _finding_matches_mode(self, finding: Finding) -> bool:
+        is_excel = finding.rule_id.startswith("excel.")
+        return is_excel == (self._scan_mode == ScanMode.DATA)
+
+    def _active_result_available(self) -> bool:
+        if self._current_result is None:
+            return False
+        if self._scan_mode == ScanMode.IMAGE:
+            return self._current_result.image_count > 0
+        return self._current_result.spreadsheet_count > 0
+
+    def _result_for_active_mode(self) -> ScanResult | None:
+        result = self._current_result
+        if result is None:
+            return None
+        findings = tuple(
+            finding for finding in result.findings if self._finding_matches_mode(finding)
+        )
+        issues = tuple(
+            issue
+            for issue in result.issues
+            if self._issue_matches_mode(Path(issue.source_path).suffix.lower())
+        )
+        image_count = result.image_count if self._scan_mode == ScanMode.IMAGE else 0
+        spreadsheet_count = result.spreadsheet_count if self._scan_mode == ScanMode.DATA else 0
+        return ScanResult(
+            source_count=image_count + spreadsheet_count,
+            image_count=image_count,
+            spreadsheet_count=spreadsheet_count,
+            findings=findings,
+            issues=issues,
+            algorithm_version=result.algorithm_version,
+            completed_at=result.completed_at,
+        )
+
+    def _issue_matches_mode(self, suffix: str) -> bool:
+        if suffix in SUPPORTED_IMAGE_EXTENSIONS:
+            return self._scan_mode == ScanMode.IMAGE
+        if suffix in SUPPORTED_SPREADSHEET_EXTENSIONS:
+            return self._scan_mode == ScanMode.DATA
+        return True
 
     @Slot(int, int)
     def _show_selected_evidence(self, row: int, column: int = 0) -> None:
@@ -832,10 +1240,15 @@ class MainWindow(QMainWindow):
         self._copy_evidence_button.setEnabled(True)
 
     def _clear_evidence(self, message: str | None = None) -> None:
-        self._evidence_images_container.show()
+        self._evidence_images_container.setVisible(self._scan_mode == ScanMode.IMAGE)
         self._first_evidence.set_evidence(None)
         self._second_evidence.set_evidence(None)
-        self._evidence_summary.setText(message or "选择一条结果后显示图像或数值证据。")
+        default_message = (
+            "选择一条图片结果后显示双图和匹配区域。"
+            if self._scan_mode == ScanMode.IMAGE
+            else "选择一条数据结果后显示单元格、完整数值和规则证据。"
+        )
+        self._evidence_summary.setText(message or default_message)
         self._crop_evidence_check.setEnabled(False)
         self._copy_evidence_button.setEnabled(False)
 
@@ -930,12 +1343,20 @@ class MainWindow(QMainWindow):
         self._update_project_state()
 
     def _update_project_state(self) -> None:
-        name = self._project.name if self._project else "未打开项目"
+        name = self._project.name if self._project else "临时任务"
         marker = " *" if self._dirty else ""
-        path_text = str(self._project_path) if self._project_path else "尚未保存"
-        self._project_label.setText(f"当前项目：{name}{marker}  ·  {path_text}")
-        self.setWindowTitle(f"医学实验图像与数据查重 · {name}{marker}")
+        if self._project is None:
+            path_text = "添加文件后可直接扫描，无需先保存项目"
+        elif self._project_path is None:
+            path_text = "尚未保存（可选）"
+        else:
+            path_text = str(self._project_path)
+        self._project_label.setText(f"当前任务：{name}{marker}  ·  {path_text}")
+        self.setWindowTitle(f"科研数据查重助手 · {name}{marker}")
         scan_running = self._thread is not None
+        self._home_nav_button.setEnabled(not scan_running)
+        self._image_nav_button.setEnabled(not scan_running)
+        self._data_nav_button.setEnabled(not scan_running)
         self._save_button.setEnabled(self._project is not None and not scan_running)
         self._new_project_button.setEnabled(not scan_running)
         self._open_project_button.setEnabled(not scan_running)
@@ -943,7 +1364,7 @@ class MainWindow(QMainWindow):
         self._add_folder_button.setEnabled(not scan_running)
         self._clear_sources_button.setEnabled(not scan_running)
         self._scan_button.setEnabled(not scan_running)
-        self._export_button.setEnabled(self._current_result is not None and not scan_running)
+        self._export_button.setEnabled(self._active_result_available() and not scan_running)
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
         self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
         for control in (

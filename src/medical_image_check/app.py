@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     app = QApplication.instance() or QApplication([sys.argv[0], *arguments])
-    app.setApplicationName("医学实验图像与数据查重")
+    app.setApplicationName("科研数据查重助手")
     app.setOrganizationName("Medical Image Check")
     window = MainWindow()
     if "--smoke-test" in arguments:
