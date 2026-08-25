@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from medical_image_check.domain.models import ScanResult
 
-PROJECT_SCHEMA_VERSION = 3
+PROJECT_SCHEMA_VERSION = 4
 DEFAULT_MINIMUM_DIGIT_RUN = 4
 
 
@@ -23,6 +23,7 @@ class Project:
     updated_at: str
     source_paths: tuple[str, ...]
     minimum_digit_run: int = DEFAULT_MINIMUM_DIGIT_RUN
+    western_single_band_enabled: bool = False
     last_scan_result: ScanResult | None = None
     report_paths: tuple[str, ...] = ()
     schema_version: int = PROJECT_SCHEMA_VERSION
@@ -77,6 +78,16 @@ class Project:
         return replace(
             self,
             minimum_digit_run=value,
+            last_scan_result=None,
+            updated_at=_now_iso(),
+        )
+
+    def with_western_single_band_enabled(self, enabled: bool) -> Project:
+        if enabled == self.western_single_band_enabled:
+            return self
+        return replace(
+            self,
+            western_single_band_enabled=enabled,
             last_scan_result=None,
             updated_at=_now_iso(),
         )

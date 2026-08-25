@@ -15,12 +15,16 @@ from medical_image_check.engines.image_exact import (
 from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 
 ProgressCallback = Callable[[int, int, str], None]
-ALGORITHM_VERSION = "generic-image-local-1+excel-advanced-1"
+ALGORITHM_VERSION = "generic-image-local-1+western-blot-1+excel-advanced-1"
 
 
 class BasicScanService:
-    def __init__(self, minimum_digit_run: int = 4) -> None:
-        self._image_detector = ImageDuplicateDetector()
+    def __init__(
+        self,
+        minimum_digit_run: int = 4,
+        western_single_band_enabled: bool = False,
+    ) -> None:
+        self._image_detector = ImageDuplicateDetector(western_single_band_enabled)
         self._excel_detector = ExactExcelDuplicateDetector(minimum_digit_run=minimum_digit_run)
 
     def collect_supported_files(self, sources: Iterable[str | Path]) -> tuple[Path, ...]:

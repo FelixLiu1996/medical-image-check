@@ -51,6 +51,7 @@ class ExcelReportExporter:
         overview.title = "扫描概览"
         self._write_overview(overview, result, project)
         self._write_findings(workbook, result)
+        self._write_image_evidence(workbook, result)
         self._write_numeric_evidence(workbook, result)
         self._write_issues(workbook, result)
         self._write_sources(workbook, project)
@@ -70,6 +71,11 @@ class ExcelReportExporter:
             ("生成时间（UTC）", datetime.now(UTC).isoformat()),
             ("项目名称", project.name if project else "未关联项目"),
             ("项目 ID", project.project_id if project else ""),
+            ("连续数字片段最短位数", project.minimum_digit_run if project else ""),
+            (
+                "Western blot 单条带检测",
+                "启用" if project and project.western_single_band_enabled else "关闭",
+            ),
             ("扫描文件数", result.source_count),
             ("图片数", result.image_count),
             ("表格数", result.spreadsheet_count),
@@ -125,6 +131,63 @@ class ExcelReportExporter:
         worksheet.freeze_panes = "A2"
         worksheet.auto_filter.ref = worksheet.dimensions
         _format_sheet(worksheet, (22, 8, 12, 24, 22, 48, 10, 48, 48, 48, 48, 12))
+
+    @staticmethod
+    def _write_image_evidence(workbook: Workbook, result: ScanResult) -> None:
+        worksheet = workbook.create_sheet("图像证据")
+        worksheet.append(
+            [
+                "结果 ID",
+                "检测规则",
+                "来源 1",
+                "页/面板 1",
+                "区域 1",
+                "条带数 1",
+                "来源 2",
+                "页/面板 2",
+                "区域 2",
+                "条带数 2",
+                "匹配条带数",
+                "条带结构相似度",
+                "排列几何相似度",
+                "背景纹理相似度",
+                "掩膜重叠率",
+                "变换",
+                "单条带模式",
+            ]
+        )
+        for finding in result.findings:
+            if not finding.rule_id.startswith("image.western_blot."):
+                continue
+            details = finding.details
+            locations = list(finding.locations)
+            worksheet.append(
+                [
+                    finding.finding_id,
+                    finding.rule_id,
+                    locations[0].source_path if locations else "",
+                    locations[0].coordinate if locations else "",
+                    _region_text(details, "first"),
+                    details.get("first_band_count", ""),
+                    locations[1].source_path if len(locations) > 1 else "",
+                    locations[1].coordinate if len(locations) > 1 else "",
+                    _region_text(details, "second"),
+                    details.get("second_band_count", ""),
+                    details.get("matched_band_count", ""),
+                    details.get("structure_similarity", ""),
+                    details.get("geometry_similarity", ""),
+                    details.get("background_similarity", ""),
+                    details.get("band_mask_iou", ""),
+                    details.get("transform_second_to_first", ""),
+                    "是" if details.get("single_band_mode") else "否",
+                ]
+            )
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        _format_sheet(
+            worksheet,
+            (22, 34, 48, 24, 24, 12, 48, 24, 24, 12, 14, 18, 18, 18, 14, 20, 14),
+        )
 
     @staticmethod
     def _write_numeric_evidence(workbook: Workbook, result: ScanResult) -> None:
@@ -250,7 +313,18 @@ def _summary_details_json(details: dict) -> str:
     paired_values = summary.get("paired_values")
     if isinstance(paired_values, list):
         summary["paired_values"] = f"共 {len(paired_values)} 行，详见“数值证据”工作表"
+    for key in ("first_bands", "second_bands"):
+        bands = summary.get(key)
+        if isinstance(bands, list):
+            summary[key] = f"共 {len(bands)} 条，详见原始结构化结果与“图像证据”工作表"
     encoded = json.dumps(summary, ensure_ascii=False, sort_keys=True)
     if len(encoded) <= 32_000:
         return encoded
-    return encoded[:31_970] + "…（内容过长，请查看数值证据工作表）"
+    return encoded[:31_970] + "…（内容过长，请查看图像或数值证据工作表）"
+
+
+def _region_text(details: dict, prefix: str) -> str:
+    values = [details.get(f"{prefix}_region_{suffix}") for suffix in ("x", "y", "width", "height")]
+    if any(value is None for value in values):
+        return ""
+    return ", ".join(str(value) for value in values)

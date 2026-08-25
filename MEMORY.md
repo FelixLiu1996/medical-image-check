@@ -14,9 +14,10 @@
 - 当前分支：`codex/v0.1-foundation`。
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
 - 已实现项目 UI 生命周期、扫描结果持久化、基础 Excel/数值证据报告、图片文件/解码像素重复、整体感知近似、局部几何重叠，以及 Excel 精确/片段/近似/连续列关系和 CI。
-- 项目清单已升级为 schema 3，并兼容读取 schema 1/2；保存连续数字片段 3–12 位设置。
+- 项目清单已升级为 schema 4，并兼容读取 schema 1/2/3；保存连续数字片段 3–12 位设置和 Western blot 单条带开关。
 - 已建立 Windows portable 工作流和 ADR-0003，并通过 GitHub Windows runner 构建、冒烟及下载校验。
-- 本地开发版本为 `0.1.0a4`，扫描算法版本为 `generic-image-local-1+excel-advanced-1`；图片和 Excel 结果均已接入证据预览。
+- 已实现 Western blot 明暗条带/面板候选、分段索引、结构/几何/背景/掩膜验证、同图 Copy-Move 和可选单条带低风险检测。
+- 本地开发版本为 `0.1.0a5`，扫描算法版本为 `generic-image-local-1+western-blot-1+excel-advanced-1`；图片和 Excel 结果均已接入证据预览与报告。
 
 ## 已确认的重要方向
 
@@ -39,16 +40,18 @@
 - 算法准确率和最终阈值需依据验收数据校准。
 - 历史库持久化和 GPU 后端仍需单独 ADR。
 - Windows portable 已通过 GitHub Windows runner 构建与打包冒烟；干净 Windows 10/11 实机人工操作仍待验证。
-- 局部图像裁剪/重叠基线已实现；单图 Copy-Move、多面板拆分和医学专项算法尚未实现。
+- 局部图像裁剪/重叠和首个 Western blot 专项基线已实现；通用单图 Copy-Move、可调整多面板拆分、荧光和病理专项算法尚未实现。
+- Western blot 当前只形成明显横向条带行候选，复杂排版、弱条带、文字标签、任意擦除/拼接仍待验收数据和后续算法覆盖。
 - Excel 数字片段、默认近似档位和连续列关系已实现；自定义容差、单次运算、顺序打乱、区域与统计规则尚未实现。
 
 ## 下一步
 
-1. 实现 Western blot 面板/泳道/条带和背景纹理候选基线。
-2. 继续荧光同视野/通道关系和普通病理局部多尺度基线。
-3. 后续补齐未完成 Excel 规则与参数界面。
-4. 在干净 Windows 10/11 实机人工验证 GUI、项目保存、扫描和报告导出。
-5. 通过 PR 合并阶段性 Alpha 基线。
+1. 完成 Western blot 基线的远程 CI、Windows portable 与下载工件校验。
+2. 使用授权 Western blot 正负例调优阈值和复杂面板/弱条带边界。
+3. 继续荧光同视野/通道关系和普通病理局部多尺度基线。
+4. 后续补齐未完成 Excel 规则与参数界面。
+5. 在干净 Windows 10/11 实机人工验证 GUI、项目保存、扫描和报告导出。
+6. 通过 PR 合并阶段性 Alpha 基线。
 
 ## 验证状态
 
@@ -57,7 +60,7 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：50 项通过。
+- `pytest`：60 项通过。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
@@ -67,3 +70,7 @@
 - Windows portable：`0.1.0a4` 在 Windows runner 构建、打包冒烟和工件上传通过（run `32831778856`）。
 - portable 工件：下载后使用原始 `.sha256` 文件校验通过，共 133 个条目，主程序、Qt/OpenCV 运行库和许可证材料齐全。
 - 局部算法：旋转/缩放/压缩裁剪、双裁剪部分重叠及无关图片负例合成测试通过；证据 UI 冒烟通过。
+- Western blot：曝光变化/水平翻转、同图面板 Copy-Move、单条带开关、无关面板负例、项目迁移、GUI 和报告合成测试通过。
+- Western 合成微基准：500 张随机条带图提取 542 个候选约 2.3 秒，验证约 31,900 对索引候选约 0.5 秒，峰值约 101 MiB，产生 1 条低风险候选。
+
+本轮 Western blot 基线、schema 4 和 `0.1.0a5` 已完成本地验证，尚待新的 GitHub CI 与 Windows portable 工作流验证。

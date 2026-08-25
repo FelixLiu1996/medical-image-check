@@ -127,3 +127,46 @@ def test_project_store_migrates_schema_version_two_digit_setting(tmp_path: Path)
 
     assert loaded.schema_version == PROJECT_SCHEMA_VERSION
     assert loaded.minimum_digit_run == 4
+    assert loaded.western_single_band_enabled is False
+
+
+def test_project_western_single_band_setting_persists_and_invalidates_scan(
+    tmp_path: Path,
+) -> None:
+    result = ScanResult(0, 0, 0, ())
+    project = Project.create("Western 设置").with_scan_result(result)
+
+    changed = project.with_western_single_band_enabled(True)
+    destination = tmp_path / "western-settings.mic-project.json"
+    ProjectStore().save(changed, destination)
+    loaded = ProjectStore().load(destination)
+
+    assert changed.last_scan_result is None
+    assert loaded.western_single_band_enabled is True
+
+
+def test_project_store_migrates_schema_version_three_western_setting(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "schema-three.mic-project.json"
+    destination.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "project_id": "schema-three",
+                "name": "版本三项目",
+                "created_at": "2026-08-25T00:00:00+00:00",
+                "updated_at": "2026-08-25T00:00:00+00:00",
+                "source_paths": [],
+                "minimum_digit_run": 4,
+                "last_scan_result": None,
+                "report_paths": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = ProjectStore().load(destination)
+
+    assert loaded.schema_version == PROJECT_SCHEMA_VERSION
+    assert loaded.western_single_band_enabled is False

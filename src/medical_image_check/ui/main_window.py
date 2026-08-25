@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal, Slot
@@ -15,6 +16,7 @@ from PySide6.QtGui import (
     QPen,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -121,17 +123,24 @@ class ScanWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, sources: list[str], minimum_digit_run: int) -> None:
+    def __init__(
+        self,
+        sources: list[str],
+        minimum_digit_run: int,
+        western_single_band_enabled: bool,
+    ) -> None:
         super().__init__()
         self._sources = sources
         self._minimum_digit_run = minimum_digit_run
+        self._western_single_band_enabled = western_single_band_enabled
 
     @Slot()
     def run(self) -> None:
         try:
-            result = BasicScanService(self._minimum_digit_run).scan(
-                self._sources, self.progress.emit
-            )
+            result = BasicScanService(
+                self._minimum_digit_run,
+                self._western_single_band_enabled,
+            ).scan(self._sources, self.progress.emit)
         except Exception as exc:  # noqa: BLE001 - worker must report unexpected failures to UI
             self.failed.emit(str(exc))
             return
@@ -161,7 +170,9 @@ class MainWindow(QMainWindow):
 
         title = QLabel("医学实验图像与数据查重")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        subtitle = QLabel("当前 Alpha 支持项目与 Excel 报告、图片完全/整体近似及局部裁剪重叠查重。")
+        subtitle = QLabel(
+            "当前 Alpha 支持项目与 Excel 报告、通用图片查重及 Western blot 专项候选。"
+        )
         subtitle.setStyleSheet("color: #666;")
         self._project_label = QLabel()
         self._project_label.setStyleSheet("color: #1f4e78; font-weight: 600;")
@@ -205,6 +216,11 @@ class MainWindow(QMainWindow):
         self._digit_run_spin.setValue(4)
         self._digit_run_spin.setToolTip("默认 4 位；数值越小召回越多，低风险结果也会明显增加。")
         scan_settings.addWidget(self._digit_run_spin)
+        self._western_single_band_check = QCheckBox("检测 Western blot 单条带相似")
+        self._western_single_band_check.setToolTip(
+            "默认关闭；单条带自然相似较常见，启用后只生成低风险人工复核候选。"
+        )
+        scan_settings.addWidget(self._western_single_band_check)
         scan_settings.addStretch(1)
         layout.addLayout(scan_settings)
 
@@ -245,6 +261,7 @@ class MainWindow(QMainWindow):
         clear.clicked.connect(self._clear_sources)
         self._scan_button.clicked.connect(self._start_scan)
         self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
+        self._western_single_band_check.toggled.connect(self._western_settings_changed)
         self._results.cellClicked.connect(self._show_selected_evidence)
         self.setCentralWidget(central)
 
@@ -275,6 +292,9 @@ class MainWindow(QMainWindow):
         self._digit_run_spin.blockSignals(True)
         self._digit_run_spin.setValue(self._project.minimum_digit_run)
         self._digit_run_spin.blockSignals(False)
+        self._western_single_band_check.blockSignals(True)
+        self._western_single_band_check.setChecked(self._project.western_single_band_enabled)
+        self._western_single_band_check.blockSignals(False)
         self._sources.clear()
         self._results.setRowCount(0)
         self._dirty = True
@@ -293,6 +313,9 @@ class MainWindow(QMainWindow):
         self._digit_run_spin.blockSignals(True)
         self._digit_run_spin.setValue(project.minimum_digit_run)
         self._digit_run_spin.blockSignals(False)
+        self._western_single_band_check.blockSignals(True)
+        self._western_single_band_check.setChecked(project.western_single_band_enabled)
+        self._western_single_band_check.blockSignals(False)
         self._dirty = False
         self._sources.clear()
         for source in project.source_paths:
@@ -481,7 +504,14 @@ class MainWindow(QMainWindow):
         self._scan_button.setEnabled(False)
         self._thread = QThread(self)
         minimum_digit_run = self._project.minimum_digit_run if self._project else 4
-        self._worker = ScanWorker(sources, minimum_digit_run)
+        western_single_band_enabled = (
+            self._project.western_single_band_enabled if self._project else False
+        )
+        self._worker = ScanWorker(
+            sources,
+            minimum_digit_run,
+            western_single_band_enabled,
+        )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._update_progress)
@@ -589,6 +619,17 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
         self._status.setText(f"连续数字片段最短位数已改为 {minimum_digit_run}，原扫描结果已失效。")
 
+    @Slot(bool)
+    def _western_settings_changed(self, enabled: bool) -> None:
+        if self._project is None or self._project.western_single_band_enabled == enabled:
+            return
+        self._project = self._project.with_western_single_band_enabled(enabled)
+        self._current_result = None
+        self._render_result(None)
+        self._mark_dirty()
+        state = "启用" if enabled else "关闭"
+        self._status.setText(f"Western blot 单条带检测已{state}，原扫描结果已失效。")
+
     @Slot()
     def _cleanup_worker(self) -> None:
         if self._worker is not None:
@@ -612,6 +653,7 @@ class MainWindow(QMainWindow):
         self._save_button.setEnabled(self._project is not None)
         self._export_button.setEnabled(self._current_result is not None)
         self._digit_run_spin.setEnabled(self._project is not None)
+        self._western_single_band_check.setEnabled(self._project is not None)
 
     def _confirm_discard_changes(self) -> bool:
         if not self._dirty:
@@ -651,11 +693,9 @@ def _evidence_region(finding: Finding, prefix: str) -> tuple[int, int, int, int]
 
 def _evidence_page(location: EvidenceLocation) -> int:
     coordinate = location.coordinate or ""
-    if coordinate.startswith("第 ") and coordinate.endswith(" 页"):
-        try:
-            return max(1, int(coordinate[2:-2]))
-        except ValueError:
-            pass
+    match = re.search(r"第\s*(\d+)\s*页", coordinate)
+    if match:
+        return max(1, int(match.group(1)))
     return 1
 
 
@@ -671,6 +711,17 @@ def _read_evidence_image(source_path: str | None, page: int) -> QImage:
 
 def _evidence_summary_text(finding: Finding) -> str:
     details = finding.details
+    if finding.rule_id.startswith("image.western_blot."):
+        return (
+            f"Western blot 证据：匹配条带 {details.get('matched_band_count', '-')} 条；"
+            f"条带结构 {_as_percent(details.get('structure_similarity'))}；"
+            f"排列几何 {_as_percent(details.get('geometry_similarity'))}；"
+            f"背景纹理 {_as_percent(details.get('background_similarity'))}；"
+            f"掩膜重叠 {_as_percent(details.get('band_mask_iou'))}；"
+            f"变换 {details.get('transform_second_to_first', '-')}；"
+            f"极性 {details.get('first_polarity', '-')} / "
+            f"{details.get('second_polarity', '-')}。"
+        )
     if finding.rule_id != "image.local.geometric":
         return f"{finding.title}：{finding.description}"
     return (

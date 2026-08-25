@@ -20,10 +20,15 @@ from medical_image_check.domain.models import (
     ScanIssue,
     deterministic_finding_id,
 )
+from medical_image_check.engines.western_blot import (
+    WesternBlotDuplicateDetector,
+    WesternRegion,
+)
 from medical_image_check.infrastructure.images import (
     ImageFeature,
     apply_transform,
-    extract_image_features,
+    decode_image_pages,
+    extract_image_features_from_pages,
     hamming_distance,
     normalized_similarity,
 )
@@ -35,6 +40,9 @@ class ImageDuplicateDetector:
     perceptual_rule_id = "image.global.perceptual"
     local_rule_id = "image.local.geometric"
 
+    def __init__(self, western_single_band_enabled: bool = False) -> None:
+        self._western_detector = WesternBlotDuplicateDetector(western_single_band_enabled)
+
     def scan(
         self,
         paths: Iterable[Path],
@@ -42,14 +50,17 @@ class ImageDuplicateDetector:
     ) -> tuple[list[Finding], list[ScanIssue]]:
         file_hashes: dict[str, list[Path]] = defaultdict(list)
         features: list[ImageFeature] = []
+        western_regions: list[WesternRegion] = []
         issues: list[ScanIssue] = []
 
         for path in paths:
             try:
                 data = path.read_bytes()
-                extracted = extract_image_features(path, data)
+                pages = decode_image_pages(path, data)
+                extracted = extract_image_features_from_pages(path, pages)
                 file_hashes[sha256(data).hexdigest()].append(path)
                 features.extend(extracted)
+                western_regions.extend(self._western_detector.extract_from_pages(path, pages))
             except (OSError, ValueError) as exc:
                 issues.append(ScanIssue(str(path), f"无法处理图片：{exc}", "error"))
             finally:
@@ -60,10 +71,12 @@ class ImageDuplicateDetector:
         pixel_findings, pixel_pairs = self._pixel_findings(features, file_hashes)
         findings.extend(pixel_findings)
         exact_pairs.update(pixel_pairs)
+        source_duplicate_pairs = set(exact_pairs)
         perceptual_findings, perceptual_pairs = self._perceptual_findings(features, exact_pairs)
         findings.extend(perceptual_findings)
         exact_pairs.update(perceptual_pairs)
         findings.extend(self._local_findings(features, exact_pairs))
+        findings.extend(self._western_detector.findings(western_regions, source_duplicate_pairs))
         return findings, issues
 
     def _file_findings(

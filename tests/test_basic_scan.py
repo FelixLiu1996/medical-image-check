@@ -32,7 +32,7 @@ def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) ->
         "excel.value.exact",
         "excel.row.exact",
     }
-    assert result.algorithm_version == "generic-image-local-1+excel-advanced-1"
+    assert result.algorithm_version == "generic-image-local-1+western-blot-1+excel-advanced-1"
     assert result.completed_at is not None
     assert progress[-1][:2] == (3, 3)
 

@@ -34,6 +34,7 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     window.create_project("界面项目", project_path)
     window._append_sources([str(source)])
     window._digit_run_spin.setValue(6)
+    window._western_single_band_check.setChecked(True)
     window._show_result(ScanResult(1, 1, 0, (), ()))
     window.save_project()
     report = window.export_excel_report(tmp_path / "ui-report.xlsx")
@@ -46,6 +47,8 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     assert restored._sources.count() == 1
     assert restored._project.minimum_digit_run == 6
     assert restored._digit_run_spin.value() == 6
+    assert restored._project.western_single_band_enabled is True
+    assert restored._western_single_band_check.isChecked()
     assert restored._current_result == ScanResult(1, 1, 0, (), ())
     assert report.exists()
 
@@ -155,6 +158,56 @@ def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> N
     assert "匹配数字片段：12345" in summary
     assert "完整值 1123456" in summary
     assert window._evidence_images_container.isHidden()
+
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_displays_western_blot_evidence(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    image = QImage(160, 100, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    assert image.save(str(first))
+    assert image.save(str(second))
+    finding = Finding(
+        finding_id="western-evidence",
+        rule_id="image.western_blot.panel_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="Western blot 面板或泳道疑似复用",
+        description="多个证据共同匹配。",
+        locations=(EvidenceLocation(str(first)), EvidenceLocation(str(second))),
+        confidence=0.91,
+        details={
+            "first_region_x": 10,
+            "first_region_y": 20,
+            "first_region_width": 100,
+            "first_region_height": 40,
+            "second_region_x": 20,
+            "second_region_y": 25,
+            "second_region_width": 110,
+            "second_region_height": 45,
+            "matched_band_count": 4,
+            "structure_similarity": 0.95,
+            "geometry_similarity": 0.9,
+            "background_similarity": 0.85,
+            "band_mask_iou": 0.8,
+            "transform_second_to_first": "flip_horizontal",
+            "first_polarity": "dark",
+            "second_polarity": "dark",
+        },
+    )
+    window = MainWindow()
+    window._render_result(ScanResult(2, 2, 0, (finding,)))
+
+    window._show_selected_evidence(0)
+
+    assert window._first_evidence._region == (10, 20, 100, 40)
+    assert window._second_evidence._region == (20, 25, 110, 45)
+    assert "匹配条带 4 条" in window._evidence_summary.text()
+    assert "背景纹理 85.0%" in window._evidence_summary.text()
 
     window.close()
     app.processEvents()

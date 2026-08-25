@@ -53,13 +53,27 @@ class ImageFeature:
 def extract_image_features(path: str | Path, data: bytes | None = None) -> tuple[ImageFeature, ...]:
     source = Path(path)
     encoded = data if data is not None else source.read_bytes()
+    pages = decode_image_pages(source, encoded)
+    return extract_image_features_from_pages(source, pages)
+
+
+def decode_image_pages(path: str | Path, data: bytes | None = None) -> tuple[NDArray, ...]:
+    source = Path(path)
+    encoded = data if data is not None else source.read_bytes()
     buffer = np.frombuffer(encoded, dtype=np.uint8)
-    pages = _decode_pages(source, buffer)
+    return _decode_pages(source, buffer)
+
+
+def extract_image_features_from_pages(
+    path: str | Path,
+    pages: tuple[NDArray, ...],
+) -> tuple[ImageFeature, ...]:
+    source = Path(path)
     page_count = len(pages)
     features: list[ImageFeature] = []
     for page_number, image in enumerate(pages, start=1):
-        canonical = _canonical_pixels(image)
-        gray = _to_gray8(canonical)
+        canonical = canonical_pixels(image)
+        gray = to_gray8(canonical)
         thumbnail_u8 = cv2.resize(
             gray,
             (THUMBNAIL_SIZE, THUMBNAIL_SIZE),
@@ -92,6 +106,14 @@ def extract_image_features(path: str | Path, data: bytes | None = None) -> tuple
             )
         )
     return tuple(features)
+
+
+def canonical_pixels(image: NDArray) -> NDArray:
+    return _canonical_pixels(image)
+
+
+def to_gray8(image: NDArray) -> NDArray[np.uint8]:
+    return _to_gray8(image)
 
 
 def apply_transform(image: NDArray, transform: str) -> NDArray:

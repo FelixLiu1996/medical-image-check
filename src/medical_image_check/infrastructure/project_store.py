@@ -43,6 +43,9 @@ class ProjectStore:
         minimum_digit_run = int(payload.get("minimum_digit_run", 4))
         if minimum_digit_run not in range(3, 13):
             raise ValueError("项目文件中的 minimum_digit_run 必须在 3 到 12 之间")
+        western_single_band_enabled = payload.get("western_single_band_enabled", False)
+        if not isinstance(western_single_band_enabled, bool):
+            raise ValueError("项目文件中的 western_single_band_enabled 必须为布尔值")
         scan_payload = payload.get("last_scan_result")
         return Project(
             project_id=str(payload["project_id"]),
@@ -51,6 +54,7 @@ class ProjectStore:
             updated_at=str(payload["updated_at"]),
             source_paths=tuple(str(item) for item in source_paths),
             minimum_digit_run=minimum_digit_run,
+            western_single_band_enabled=western_single_band_enabled,
             last_scan_result=_scan_result_from_dict(scan_payload) if scan_payload else None,
             report_paths=tuple(str(item) for item in report_paths),
             schema_version=PROJECT_SCHEMA_VERSION,
@@ -66,6 +70,7 @@ def _project_to_dict(project: Project) -> dict[str, object]:
         "updated_at": project.updated_at,
         "source_paths": list(project.source_paths),
         "minimum_digit_run": project.minimum_digit_run,
+        "western_single_band_enabled": project.western_single_band_enabled,
         "last_scan_result": (
             _scan_result_to_dict(project.last_scan_result) if project.last_scan_result else None
         ),
