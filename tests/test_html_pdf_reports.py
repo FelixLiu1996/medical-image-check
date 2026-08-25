@@ -21,10 +21,14 @@ def _report_fixture(tmp_path: Path) -> tuple[ScanResult, Project, Path, Path]:
     second = tmp_path / "荧光图-B.png"
     image = np.zeros((120, 180, 3), dtype=np.uint8)
     cv2.circle(image, (70, 55), 24, (255, 80, 20), -1)
-    assert cv2.imwrite(str(first), image)
+    encoded, first_png = cv2.imencode(".png", image)
+    assert encoded
+    first.write_bytes(first_png.tobytes())
     changed = image.copy()
     changed[:, :, 1] = np.maximum(changed[:, :, 1], image[:, :, 0] // 3)
-    assert cv2.imwrite(str(second), changed)
+    encoded, second_png = cv2.imencode(".png", changed)
+    assert encoded
+    second.write_bytes(second_png.tobytes())
     finding = Finding(
         finding_id="html-pdf-evidence",
         rule_id="image.fluorescence.merge_component",
