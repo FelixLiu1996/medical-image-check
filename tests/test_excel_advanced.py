@@ -128,6 +128,22 @@ def test_detector_finds_two_cell_target_operation(tmp_path: Path) -> None:
     assert all(item.risk == "low" for item in operations)
 
 
+def test_cell_operation_uses_two_distinct_cells_with_the_same_value(tmp_path: Path) -> None:
+    path = tmp_path / "same-value-operation.xlsx"
+    _save_columns(path, [5, 5])
+
+    findings, _ = ExactExcelDuplicateDetector().scan([path])
+
+    operation = next(
+        item
+        for item in findings
+        if item.rule_id == "excel.cell.target_operation" and item.details["operation"] == "add"
+    )
+    assert operation.details["parameter"] == "10"
+    pair = operation.details["paired_values"][0]
+    assert pair["first_coordinate"] != pair["second_coordinate"]
+
+
 def test_detector_finds_shuffled_and_near_duplicate_series(tmp_path: Path) -> None:
     shuffled_path = tmp_path / "shuffled.xlsx"
     near_path = tmp_path / "near.xlsx"
@@ -168,6 +184,19 @@ def test_detector_finds_robust_linear_relation_with_outlier(tmp_path: Path) -> N
     assert linear.details["intercept"] == "2"
     assert linear.details["matched_count"] == 4
     assert linear.details["outlier_count"] == 1
+
+
+def test_custom_tolerance_finds_whole_near_duplicate_series(tmp_path: Path) -> None:
+    path = tmp_path / "near-series.xlsx"
+    _save_columns(path, [100, 200, 300, 400, 500], [100.1, 200.2, 300.3, 400.4, 500.5])
+    settings = ExcelAnalysisSettings.from_values(0.2)
+
+    findings, _ = ExactExcelDuplicateDetector(analysis_settings=settings).scan([path])
+
+    near = next(item for item in findings if item.rule_id == "excel.series.near_duplicate")
+    assert near.details["matched_count"] == 5
+    assert near.details["mismatch_count"] == 5
+    assert near.details["out_of_tolerance_count"] == 0
 
 
 def test_detector_finds_exact_two_dimensional_region(tmp_path: Path) -> None:

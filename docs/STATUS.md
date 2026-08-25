@@ -102,7 +102,7 @@
 - Python 3.12.13
 - Ruff 检查与格式检查通过
 - `pip check` 通过
-- pytest 86 项通过
+- pytest 88 项通过
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过

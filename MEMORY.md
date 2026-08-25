@@ -67,7 +67,7 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：86 项通过。
+- `pytest`：88 项通过。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。

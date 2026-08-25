@@ -1147,7 +1147,8 @@ def _excel_evidence_summary_text(finding: Finding) -> str:
         ]
         if "mismatch_count" in finding.details:
             lines.append(
-                f"不同位置：{finding.details.get('mismatch_count', '-')}；"
+                f"不同完整值位置：{finding.details.get('mismatch_count', '-')}；"
+                f"超出容差：{finding.details.get('out_of_tolerance_count', '-')}；"
                 f"相似度：{_as_percent(finding.details.get('similarity'))}。"
             )
         if "slope" in finding.details:

@@ -115,7 +115,9 @@ def _find_cell_operations(
         *,
         symmetric: bool,
     ) -> None:
-        if len(findings) >= MAX_FINDINGS_PER_RULE or first_key == second_key:
+        if len(findings) >= MAX_FINDINGS_PER_RULE:
+            return
+        if first_key == second_key and len(grouped[first_key]) < 2:
             return
         first_value = values[first_key]
         second_value = values[second_key]
@@ -127,7 +129,7 @@ def _find_cell_operations(
             return
         seen.add(dedupe_key)
         first_cell = grouped[first_key][0]
-        second_cell = grouped[second_key][0]
+        second_cell = grouped[second_key][1 if first_key == second_key else 0]
         locations = (first_cell.location, second_cell.location)
         symbol = {"add": "+", "subtract": "-", "multiply": "×", "divide": "÷"}[operation]
         findings.append(
@@ -222,6 +224,8 @@ def _apply_operation(first: Decimal, second: Decimal, operation: str) -> Decimal
 
 def _is_trivial_operation(first: Decimal, second: Decimal, operation: str, target: Decimal) -> bool:
     if first in {Decimal(0), Decimal(1)} and second in {Decimal(0), Decimal(1)}:
+        return True
+    if first == second and operation in {"subtract", "divide"}:
         return True
     if operation == "add" and (first == 0 or second == 0):
         return True
@@ -427,37 +431,43 @@ def _find_near_duplicate_series(
             continue
         first_values = first.values
         second_values = second.values
-        equal = [
+        exact = [left == right for left, right in zip(first_values, second_values, strict=True)]
+        close = [
             settings.close(left, right)
             for left, right in zip(first_values, second_values, strict=True)
         ]
-        mismatch_count = length - sum(equal)
+        mismatch_count = length - sum(exact)
+        out_of_tolerance_count = length - sum(close)
         maximum_mismatches = max(1, math.floor(length * 0.2))
-        if not 1 <= mismatch_count <= maximum_mismatches:
+        if mismatch_count < 1 or out_of_tolerance_count > maximum_mismatches:
             continue
         if Counter(first_values) == Counter(second_values):
             continue
-        similarity = (length - mismatch_count) / length
+        similarity = (length - out_of_tolerance_count) / length
         locations = (first.location, second.location)
-        risk = settings.risk_for_run(length - mismatch_count)
+        risk = settings.risk_for_run(length - out_of_tolerance_count)
         findings.append(
             Finding(
                 deterministic_finding_id(SERIES_NEAR_DUPLICATE_RULE_ID, locations),
                 SERIES_NEAR_DUPLICATE_RULE_ID,
                 FindingType.SUSPECTED_REUSE,
                 risk,
-                "数值序列仅有少量位置被修改",
-                f"两列有 {length - mismatch_count}/{length} 个位置的完整值一致或近似一致。",
+                "数值序列高度近似或仅有少量位置被修改",
+                (
+                    f"两列有 {length - out_of_tolerance_count}/{length} 个位置的"
+                    "完整值一致或落入配置容差。"
+                ),
                 locations,
                 min(0.95, 0.7 + similarity * 0.25),
                 {
-                    "matched_count": length - mismatch_count,
+                    "matched_count": length - out_of_tolerance_count,
                     "mismatch_count": mismatch_count,
+                    "out_of_tolerance_count": out_of_tolerance_count,
                     "similarity": similarity,
                     "alignment": "按每列数值单元格出现顺序",
                     "first_series": _series_evidence(first),
                     "second_series": _series_evidence(second),
-                    "paired_values": _paired_series(first, second, equal),
+                    "paired_values": _paired_series(first, second, close),
                 },
             )
         )
@@ -805,8 +815,6 @@ def _find_statistical_similarity(
         if first_values is None or second_values is None:
             continue
         if Counter(first.values) == Counter(second.values):
-            continue
-        if abs(_correlation(first_values, second_values)) >= 0.999:
             continue
         first_normalized = _normalized_sorted(first_values)
         second_normalized = _normalized_sorted(second_values)
