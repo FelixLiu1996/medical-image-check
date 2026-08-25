@@ -63,7 +63,7 @@ def find_excel_pattern_findings(
     settings: ExcelAnalysisSettings,
     checkpoint: Callable[[], None] | None = None,
 ) -> list[Finding]:
-    series = _collect_series(cells)
+    series = _collect_series(cells, settings.medium_run_length)
     phases = (
         lambda: _find_cell_operations(cells, settings, checkpoint),
         lambda: _find_exact_series_fragments(series, settings, checkpoint),
@@ -81,14 +81,16 @@ def find_excel_pattern_findings(
     return findings
 
 
-def _collect_series(cells: list[NumericCell]) -> list[_Series]:
+def _collect_series(
+    cells: list[NumericCell], minimum_length: int = MINIMUM_SERIES_LENGTH
+) -> list[_Series]:
     grouped: dict[tuple[str, str, int], list[NumericCell]] = defaultdict(list)
     for cell in cells:
         grouped[(cell.source_path, cell.sheet, cell.column)].append(cell)
     return [
         _Series(key[0], key[1], key[2], tuple(sorted(items, key=lambda cell: cell.row)))
         for key, items in sorted(grouped.items())
-        if len(items) >= MINIMUM_SERIES_LENGTH
+        if len(items) >= minimum_length
     ]
 
 

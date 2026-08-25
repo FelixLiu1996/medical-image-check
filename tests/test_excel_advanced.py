@@ -102,6 +102,18 @@ def test_three_repeated_series_relations_are_medium_risk(tmp_path: Path) -> None
     assert scale[0].risk == "medium"
 
 
+def test_configured_medium_threshold_can_enable_two_value_relation(tmp_path: Path) -> None:
+    path = tmp_path / "two-values.xlsx"
+    _save_columns(path, [2, 3], [4, 6])
+    settings = ExcelAnalysisSettings.from_values(medium_run_length=2, high_run_length=3)
+
+    findings, _ = ExactExcelDuplicateDetector(analysis_settings=settings).scan([path])
+
+    scale = next(item for item in findings if item.rule_id == "excel.series.scale")
+    assert scale.risk == "medium"
+    assert scale.details["matched_count"] == 2
+
+
 def test_custom_relative_tolerance_can_be_enabled(tmp_path: Path) -> None:
     path = tmp_path / "custom-tolerance.xlsx"
     _save_columns(path, [100, 101.5])

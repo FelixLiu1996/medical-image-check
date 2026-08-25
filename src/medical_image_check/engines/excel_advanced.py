@@ -216,7 +216,7 @@ def _find_series_relations(
     settings: ExcelAnalysisSettings,
     checkpoint: Callable[[], None] | None = None,
 ) -> list[Finding]:
-    series = _collect_series(cells)
+    series = _collect_series(cells, settings.medium_run_length)
     findings: list[Finding] = []
     for pair_index, (first_index, second_index) in enumerate(
         sorted(_series_candidate_pairs(series))
@@ -227,7 +227,9 @@ def _find_series_relations(
     return findings
 
 
-def _collect_series(cells: list[NumericCell]) -> list[_NumericSeries]:
+def _collect_series(
+    cells: list[NumericCell], minimum_length: int = MINIMUM_SERIES_LENGTH
+) -> list[_NumericSeries]:
     grouped: dict[tuple[str, str, int], list[NumericCell]] = defaultdict(list)
     for cell in cells:
         grouped[(cell.source_path, cell.sheet, cell.column)].append(cell)
@@ -239,7 +241,7 @@ def _collect_series(cells: list[NumericCell]) -> list[_NumericSeries]:
             cells=tuple(sorted(grouped_cells, key=lambda cell: cell.row)),
         )
         for key, grouped_cells in sorted(grouped.items())
-        if len(grouped_cells) >= MINIMUM_SERIES_LENGTH
+        if len(grouped_cells) >= minimum_length
     ]
 
 
