@@ -12,6 +12,7 @@ on:
       - "requirements/**"
       - "main.py"
       - "src/**"
+      - "tests/**"
       - "scripts/collect_licenses.py"
       - "legal/**"
       - "LICENSE"
