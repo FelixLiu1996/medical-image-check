@@ -1,0 +1,49 @@
+# 数据模型初稿
+
+状态：需求级模型，存储技术尚未确定。
+
+## 核心实体
+
+- Project：项目标识、名称、版本、创建/更新时间、设置。
+- Source：原始文件、路径、格式、大小、指纹、状态。
+- ImageItem：图片、TIFF 页或面板及其原图坐标。
+- WorkbookItem：Excel/CSV 文件、工作表及可扫描数值范围。
+- Group：实验组、通道、视野、病理倍率等用户或自动分组。
+- FeatureRecord：算法版本、特征类型、模型版本和索引位置。
+- ScanTask：扫描阶段、参数、进度、资源、断点和错误。
+- Finding：结果类型、规则、风险、分数和证据。
+- FindingGroup：互相关联的多个对象组成的重复组。
+- Review：确认重复、正常关联、误报、待定和备注。
+- HistoryEntry：历史库来源、指纹、特征和复核状态。
+- Report：格式、筛选范围、生成版本和文件位置。
+
+## 原始数据原则
+
+- Source 默认保存绝对路径和指纹，不修改文件。
+- 可选归档模式保存只读副本。
+- 项目结果必须能够判断源文件丢失、移动或内容变化。
+
+## 项目包
+
+项目包至少包含：
+
+- Manifest：格式版本、软件版本、创建时间和内容清单。
+- Project：项目设置和分组。
+- Index：指纹、缩略图和可移植查重特征。
+- Results：结果、证据和人工复核。
+- Reports：用户选择包含的报告。
+- Originals：仅完整项目包可选包含。
+- Checksums：包内关键内容校验。
+
+导入未知或较新格式版本时不得静默损坏数据，应拒绝并说明，或通过明确迁移流程处理。
+
+## 版本
+
+- `project_schema_version`
+- `package_format_version`
+- `history_schema_version`
+- `algorithm_version`
+- `model_version`
+- `report_schema_version`
+
+人工结论继承必须同时核对源指纹、对应区域和相关算法规则。
