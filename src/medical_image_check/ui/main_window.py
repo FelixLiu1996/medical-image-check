@@ -74,6 +74,7 @@ from medical_image_check.services.excel_report import ExcelReportExporter
 from medical_image_check.services.feedback_export import FeedbackExporter
 from medical_image_check.services.html_report import HtmlReportExporter
 from medical_image_check.services.pdf_report import PdfReportExporter
+from medical_image_check.services.performance_export import PerformanceExporter
 from medical_image_check.services.report_common import REVIEW_LABELS
 
 PROJECT_FILTER = "医学查重项目 (*.mic-project.json)"
@@ -387,6 +388,7 @@ class MainWindow(QMainWindow):
         self._html_report_exporter = HtmlReportExporter()
         self._pdf_report_exporter = PdfReportExporter()
         self._feedback_exporter = FeedbackExporter()
+        self._performance_exporter = PerformanceExporter()
         self._build_ui()
         self._update_project_state()
 
@@ -468,6 +470,7 @@ class MainWindow(QMainWindow):
         self._scan_button.clicked.connect(self._start_scan)
         self._pause_button.clicked.connect(self._toggle_scan_pause)
         self._cancel_button.clicked.connect(self._cancel_scan)
+        self._performance_export_button.clicked.connect(self._export_performance_dialog)
         self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
         self._western_single_band_check.toggled.connect(self._western_settings_changed)
         self._image_analysis_mode_combo.currentIndexChanged.connect(
@@ -615,6 +618,11 @@ class MainWindow(QMainWindow):
         self._pause_button.setEnabled(False)
         self._cancel_button = QPushButton("取消")
         self._cancel_button.setEnabled(False)
+        self._performance_export_button = QPushButton("导出性能诊断")
+        self._performance_export_button.setToolTip(
+            "导出分阶段耗时、CPU/GPU 环境和执行后端；不包含原始文件或证据"
+        )
+        self._performance_export_button.setEnabled(False)
         actions.addWidget(self._add_files_button)
         actions.addWidget(self._add_folder_button)
         actions.addWidget(self._clear_sources_button)
@@ -622,6 +630,7 @@ class MainWindow(QMainWindow):
         actions.addWidget(self._scan_button)
         actions.addWidget(self._pause_button)
         actions.addWidget(self._cancel_button)
+        actions.addWidget(self._performance_export_button)
         input_layout.addLayout(actions)
 
         self._sources_label = QLabel()
@@ -888,6 +897,7 @@ class MainWindow(QMainWindow):
             ("项目另存为", QKeySequence.StandardKey.SaveAs, self._save_project_as),
             ("导出报告…", "Ctrl+E", self._export_report_dialog),
             ("导出反馈清单…", "Ctrl+Shift+E", self._export_feedback_dialog),
+            ("导出性能诊断…", "Ctrl+Alt+E", self._export_performance_dialog),
         ]
         for text, shortcut, callback in actions:
             action = QAction(text, self)
@@ -1012,6 +1022,14 @@ class MainWindow(QMainWindow):
         output = self._feedback_exporter.export(result, path, self._project)
         count = len(marked_findings(result))
         self._status.setText(f"已导出 {count} 条人工反馈：{output}")
+        return output
+
+    def export_performance_diagnostic(self, path: str | Path) -> Path:
+        result = self._result_for_active_mode()
+        if result is None or result.performance is None:
+            raise ValueError("当前结果不包含性能诊断数据，请使用此版本重新扫描")
+        output = self._performance_exporter.export(result, path, self._project)
+        self._status.setText(f"性能诊断已导出：{output}")
         return output
 
     def _record_report(self, output: Path, report_type: str) -> None:
@@ -1177,6 +1195,36 @@ class MainWindow(QMainWindow):
         )
 
     @Slot()
+    def _export_performance_dialog(self) -> None:
+        result = self._result_for_active_mode()
+        if result is None or result.performance is None:
+            QMessageBox.information(
+                self,
+                "没有性能数据",
+                "请使用当前版本完成一次扫描后再导出性能诊断。",
+            )
+            return
+        project_name = self._project.name if self._project else "查重"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出性能诊断",
+            f"{project_name}-性能诊断.json",
+            "JSON 性能诊断 (*.json)",
+        )
+        if not path:
+            return
+        try:
+            output = self.export_performance_diagnostic(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "性能诊断导出失败", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "导出完成",
+            f"性能诊断已保存到：\n{output}\n\n文件不包含原始图片、表格路径或查重证据。",
+        )
+
+    @Slot()
     def _select_files(self) -> None:
         is_image = self._scan_mode == ScanMode.IMAGE
         paths, _ = QFileDialog.getOpenFileNames(
@@ -1325,9 +1373,18 @@ class MainWindow(QMainWindow):
             self._mark_dirty()
             if self._project_path is not None:
                 self._save_current_project(silent=True)
+        performance_text = ""
+        if result.performance is not None:
+            gpu_text = ""
+            if result.performance.environment.nvidia_gpus:
+                gpu_text = f"（检测到 {result.performance.environment.nvidia_gpus[0].name}）"
+            performance_text = (
+                f"，有效用时 {result.performance.active_seconds:.2f} 秒，"
+                f"后端 {result.performance.selected_backend.upper()}{gpu_text}"
+            )
         self._status.setText(
             f"扫描完成：{result.source_count} 个文件，{len(result.findings)} 条结果，"
-            f"{len(result.issues)} 个提示。"
+            f"{len(result.issues)} 个提示{performance_text}。"
         )
         if result.issues:
             preview = "\n".join(issue.message for issue in result.issues[:8])
@@ -1444,6 +1501,7 @@ class MainWindow(QMainWindow):
             issues=issues,
             algorithm_version=result.algorithm_version,
             completed_at=result.completed_at,
+            performance=result.performance,
         )
 
     def _issue_matches_mode(self, suffix: str) -> bool:
@@ -1663,6 +1721,9 @@ class MainWindow(QMainWindow):
         active_result = self._result_for_active_mode()
         self._feedback_export_button.setEnabled(
             active_result is not None and bool(marked_findings(active_result)) and not scan_running
+        )
+        self._performance_export_button.setEnabled(
+            active_result is not None and active_result.performance is not None and not scan_running
         )
         self._review_filter_combo.setEnabled(self._current_result is not None and not scan_running)
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)

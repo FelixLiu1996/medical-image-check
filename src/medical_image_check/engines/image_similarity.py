@@ -44,6 +44,11 @@ from medical_image_check.infrastructure.images import (
     hamming_distance,
     normalized_similarity,
 )
+from medical_image_check.infrastructure.performance import (
+    PerformanceRecorder,
+    profile_stage,
+    record_items,
+)
 
 
 class ImageDuplicateDetector:
@@ -68,6 +73,7 @@ class ImageDuplicateDetector:
         paths: Iterable[Path],
         on_file: Callable[[Path], None] | None = None,
         checkpoint: Callable[[], None] | None = None,
+        profiler: PerformanceRecorder | None = None,
     ) -> tuple[list[Finding], list[ScanIssue]]:
         file_hashes: dict[str, list[Path]] = defaultdict(list)
         features: list[ImageFeature] = []
@@ -81,43 +87,59 @@ class ImageDuplicateDetector:
             if checkpoint:
                 checkpoint()
             try:
-                data = path.read_bytes()
-                pages = decode_image_pages(path, data)
-                extracted = extract_image_features_from_pages(path, pages)
-                file_hashes[sha256(data).hexdigest()].append(path)
-                features.extend(extracted)
+                with profile_stage(profiler, "image.read_decode"):
+                    data = path.read_bytes()
+                    pages = decode_image_pages(path, data)
+                    file_hashes[sha256(data).hexdigest()].append(path)
+                record_items(profiler, "image.read_decode", len(pages))
+                with profile_stage(profiler, "image.generic_features"):
+                    extracted = extract_image_features_from_pages(path, pages)
+                    features.extend(extracted)
+                record_items(profiler, "image.generic_features", len(extracted))
                 if self.analysis_mode in {
                     ImageAnalysisMode.AUTO,
                     ImageAnalysisMode.DOT_BLOT,
                 }:
-                    dot_blot_regions.extend(self._dot_blot_detector.extract_from_pages(path, pages))
+                    with profile_stage(profiler, "image.dot_blot_features"):
+                        extracted_dot_blot = self._dot_blot_detector.extract_from_pages(path, pages)
+                        dot_blot_regions.extend(extracted_dot_blot)
+                    record_items(profiler, "image.dot_blot_features", len(extracted_dot_blot))
                 if self.analysis_mode in {
                     ImageAnalysisMode.AUTO,
                     ImageAnalysisMode.FLUORESCENCE,
                 }:
-                    fluorescence_pages.extend(
-                        self._fluorescence_detector.extract_from_pages(
-                            path,
-                            pages,
-                            force=self.analysis_mode == ImageAnalysisMode.FLUORESCENCE,
+                    with profile_stage(profiler, "image.fluorescence_features"):
+                        extracted_fluorescence = self._fluorescence_detector.extract_from_pages(
+                            path, pages, force=self.analysis_mode == ImageAnalysisMode.FLUORESCENCE
                         )
+                        fluorescence_pages.extend(extracted_fluorescence)
+                    record_items(
+                        profiler,
+                        "image.fluorescence_features",
+                        len(extracted_fluorescence),
                     )
                 if self.analysis_mode in {
                     ImageAnalysisMode.AUTO,
                     ImageAnalysisMode.PATHOLOGY,
                 }:
-                    pathology_regions.extend(
-                        self._pathology_detector.extract_from_pages(
-                            path,
-                            pages,
-                            force=self.analysis_mode == ImageAnalysisMode.PATHOLOGY,
+                    with profile_stage(profiler, "image.pathology_features"):
+                        extracted_pathology = self._pathology_detector.extract_from_pages(
+                            path, pages, force=self.analysis_mode == ImageAnalysisMode.PATHOLOGY
                         )
+                        pathology_regions.extend(extracted_pathology)
+                    record_items(
+                        profiler,
+                        "image.pathology_features",
+                        len(extracted_pathology),
                     )
                 if self.analysis_mode == ImageAnalysisMode.WESTERN_BLOT or (
                     self.analysis_mode == ImageAnalysisMode.AUTO
                     and _looks_like_western_input(path, pages)
                 ):
-                    western_regions.extend(self._western_detector.extract_from_pages(path, pages))
+                    with profile_stage(profiler, "image.western_features"):
+                        extracted_western = self._western_detector.extract_from_pages(path, pages)
+                        western_regions.extend(extracted_western)
+                    record_items(profiler, "image.western_features", len(extracted_western))
             except (OSError, ValueError) as exc:
                 issues.append(ScanIssue(str(path), f"无法处理图片：{exc}", "error"))
             finally:
@@ -126,69 +148,82 @@ class ImageDuplicateDetector:
 
         if checkpoint:
             checkpoint()
-        findings, exact_pairs = self._file_findings(file_hashes)
-        pixel_findings, pixel_pairs = self._pixel_findings(features, file_hashes)
-        findings.extend(pixel_findings)
-        exact_pairs.update(pixel_pairs)
+        with profile_stage(profiler, "image.exact_verification"):
+            findings, exact_pairs = self._file_findings(file_hashes)
+            pixel_findings, pixel_pairs = self._pixel_findings(features, file_hashes)
+            findings.extend(pixel_findings)
+            exact_pairs.update(pixel_pairs)
+        record_items(profiler, "image.exact_verification", len(features))
         source_duplicate_pairs = set(exact_pairs)
-        perceptual_findings, perceptual_pairs = self._perceptual_findings(
-            features,
-            exact_pairs,
-            checkpoint,
-        )
-        findings.extend(perceptual_findings)
-        exact_pairs.update(perceptual_pairs)
-        findings.extend(self._local_findings(features, exact_pairs, checkpoint))
-        findings.extend(
-            self._dot_blot_detector.findings(
+        with profile_stage(profiler, "image.perceptual_verification"):
+            perceptual_findings, perceptual_pairs = self._perceptual_findings(
+                features,
+                exact_pairs,
+                checkpoint,
+            )
+            findings.extend(perceptual_findings)
+            exact_pairs.update(perceptual_pairs)
+        record_items(profiler, "image.perceptual_verification", len(perceptual_findings))
+        with profile_stage(profiler, "image.local_geometric_verification"):
+            local_findings = self._local_findings(features, exact_pairs, checkpoint)
+            findings.extend(local_findings)
+        record_items(profiler, "image.local_geometric_verification", len(local_findings))
+        with profile_stage(profiler, "image.dot_blot_verification"):
+            dot_blot_findings = self._dot_blot_detector.findings(
                 dot_blot_regions,
                 source_duplicate_pairs,
                 checkpoint,
             )
-        )
-        findings.extend(
-            self._fluorescence_detector.findings(
+            findings.extend(dot_blot_findings)
+        record_items(profiler, "image.dot_blot_verification", len(dot_blot_findings))
+        with profile_stage(profiler, "image.fluorescence_verification"):
+            fluorescence_findings = self._fluorescence_detector.findings(
                 fluorescence_pages,
                 source_duplicate_pairs,
                 checkpoint,
             )
-        )
-        findings.extend(
-            self._pathology_detector.findings(
+            findings.extend(fluorescence_findings)
+        record_items(profiler, "image.fluorescence_verification", len(fluorescence_findings))
+        with profile_stage(profiler, "image.pathology_verification"):
+            pathology_findings = self._pathology_detector.findings(
                 pathology_regions,
                 source_duplicate_pairs,
                 checkpoint,
             )
-        )
-        findings.extend(
-            self._western_detector.findings(
+            findings.extend(pathology_findings)
+        record_items(profiler, "image.pathology_verification", len(pathology_findings))
+        with profile_stage(profiler, "image.western_verification"):
+            western_findings = self._western_detector.findings(
                 western_regions,
                 source_duplicate_pairs,
                 checkpoint,
             )
-        )
-        specialist_pairs = {
-            pair
-            for finding in findings
-            if finding.rule_id.startswith(
-                (
-                    "image.dot_blot.",
-                    "image.western_blot.",
-                    "image.fluorescence.",
-                    "image.pathology.",
+            findings.extend(western_findings)
+        record_items(profiler, "image.western_verification", len(western_findings))
+        with profile_stage(profiler, "image.result_deduplication"):
+            specialist_pairs = {
+                pair
+                for finding in findings
+                if finding.rule_id.startswith(
+                    (
+                        "image.dot_blot.",
+                        "image.western_blot.",
+                        "image.fluorescence.",
+                        "image.pathology.",
+                    )
                 )
-            )
-            for pair in (_finding_page_pair(finding),)
-            if pair is not None
-        }
-        findings = [
-            finding
-            for finding in findings
-            if not (
-                finding.rule_id in {self.perceptual_rule_id, self.local_rule_id}
-                and _finding_page_pair(finding) in specialist_pairs
-            )
-        ]
+                for pair in (_finding_page_pair(finding),)
+                if pair is not None
+            }
+            findings = [
+                finding
+                for finding in findings
+                if not (
+                    finding.rule_id in {self.perceptual_rule_id, self.local_rule_id}
+                    and _finding_page_pair(finding) in specialist_pairs
+                )
+            ]
+        record_items(profiler, "image.result_deduplication", len(findings))
         return findings, issues
 
     def _file_findings(

@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-当前开发版本：`0.1.0a11`。
+当前开发版本：`0.1.0a12`。
 
 ### Added
 
@@ -69,6 +69,10 @@
 - 人工反馈随项目清单保存；同一算法版本的稳定结果重新扫描时按结果 ID 继承已有标记。
 - 增加 Excel/JSON 算法反馈清单导出，只包含已标记结果及算法、规则、位置和结构化证据，不复制原始文件。
 - 统一采用 `<agent-name>/<feature-name>` 功能分支命名，例如 `codex/lightweight-review-feedback`。
+- 增加扫描 performance schema 1，记录排除暂停后的有效耗时和图片/Excel 分阶段耗时、调用次数及处理项数。
+- 增加本地运行环境与 NVIDIA `nvidia-smi`/OpenCV CUDA 探测；探测失败不影响 CPU 完整扫描。
+- GUI 增加 JSON 性能诊断导出，不包含原始文件、输入路径或查重证据。
+- 增加 ADR-0005，确认以 RTX 3080 Ti 为首个参考 GPU，先画像再选择 CUDA 后端。
 
 ### Changed
 
@@ -84,6 +88,7 @@
 - 扫描算法版本升级为 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
 - 软件版本升级为 `0.1.0a10`。
 - 软件版本升级为 `0.1.0a11`；扫描算法版本保持不变。
+- 软件版本升级为 `0.1.0a12`，项目清单升级为 schema 7；扫描算法版本保持不变，GPU 计算尚未启用。
 - 病理自动准入增加染色色度要求，灰度 Western/Dot blot 不再默认进入病理专项；用户显式选择病理时仍可强制运行。
 - 同一图片页对已有专项证据时折叠重复的通用感知/局部结果。
 

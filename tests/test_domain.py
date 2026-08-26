@@ -11,6 +11,12 @@ from medical_image_check.domain.models import (
     ScanIssue,
     ScanResult,
 )
+from medical_image_check.domain.performance import (
+    GpuDevice,
+    RuntimeEnvironment,
+    ScanPerformance,
+    StageTiming,
+)
 from medical_image_check.domain.project import PROJECT_SCHEMA_VERSION, Project
 from medical_image_check.infrastructure.project_store import ProjectStore
 from medical_image_check.infrastructure.spreadsheets import canonical_numeric
@@ -44,7 +50,33 @@ def test_project_store_round_trip(tmp_path: Path) -> None:
         locations=(EvidenceLocation(str(source)),),
         details={"count": 1, "cells": [{"coordinate": "A1", "value": "2.5"}]},
     )
-    result = ScanResult(1, 1, 0, (finding,), (ScanIssue(str(source), "测试提示"),))
+    performance = ScanPerformance(
+        schema_version=1,
+        selected_backend="cpu",
+        accelerator_status="nvidia_hardware_detected_opencv_cuda_unavailable",
+        wall_seconds=1.5,
+        active_seconds=1.25,
+        paused_seconds=0.25,
+        stages=(StageTiming("image.generic_features", 1.0, 1, 1),),
+        environment=RuntimeEnvironment(
+            "Windows",
+            "11",
+            "AMD64",
+            "test-cpu",
+            16,
+            "3.12.13",
+            "4.14.0",
+            (GpuDevice("NVIDIA GeForce RTX 3080 Ti", "999.1", 12288),),
+        ),
+    )
+    result = ScanResult(
+        1,
+        1,
+        0,
+        (finding,),
+        (ScanIssue(str(source), "测试提示"),),
+        performance=performance,
+    )
     project = Project.create("基础查重").with_sources([source]).with_scan_result(result)
     destination = tmp_path / "project.mic-project.json"
 
@@ -231,3 +263,38 @@ def test_project_store_migrates_schema_version_four_excel_settings(tmp_path: Pat
     assert loaded.schema_version == PROJECT_SCHEMA_VERSION
     assert loaded.excel_custom_relative_tolerance_percent == 0
     assert loaded.excel_operation_targets == ("0", "1", "10", "100", "1000")
+
+
+@pytest.mark.parametrize("schema_version", [5, 6])
+def test_project_store_migrates_recent_schema_without_performance(
+    tmp_path: Path,
+    schema_version: int,
+) -> None:
+    destination = tmp_path / f"schema-{schema_version}.mic-project.json"
+    destination.write_text(
+        json.dumps(
+            {
+                "schema_version": schema_version,
+                "project_id": f"schema-{schema_version}",
+                "name": "旧性能项目",
+                "created_at": "2026-08-25T00:00:00+00:00",
+                "updated_at": "2026-08-25T00:00:00+00:00",
+                "source_paths": [],
+                "last_scan_result": {
+                    "source_count": 0,
+                    "image_count": 0,
+                    "spreadsheet_count": 0,
+                    "findings": [],
+                    "issues": [],
+                },
+                "report_paths": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = ProjectStore().load(destination)
+
+    assert loaded.schema_version == PROJECT_SCHEMA_VERSION
+    assert loaded.last_scan_result is not None
+    assert loaded.last_scan_result.performance is None

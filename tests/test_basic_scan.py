@@ -44,6 +44,14 @@ def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) ->
         "generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3"
     )
     assert result.completed_at is not None
+    assert result.performance is not None
+    assert result.performance.selected_backend == "cpu"
+    assert {stage.stage_id for stage in result.performance.stages} >= {
+        "source.collect",
+        "image.generic_features",
+        "spreadsheet.read",
+        "result.sort",
+    }
     assert progress[-1][:2] == (3, 3)
 
 

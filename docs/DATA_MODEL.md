@@ -4,17 +4,18 @@
 
 ## 当前实现
 
-- `Project` 使用 `schema_version = 6`，包含 UUID、名称、时间、源路径、图片内容类型、连续数字片段最短位数、Western blot 单条带开关、Excel 自定义相对/绝对容差、运算目标、连续风险阈值、最近一次扫描结果和 Excel/HTML/PDF 报告路径。
+- `Project` 使用 `schema_version = 7`，包含 UUID、名称、时间、源路径、图片内容类型、连续数字片段最短位数、Western blot 单条带开关、Excel 自定义相对/绝对容差、运算目标、连续风险阈值、最近一次扫描结果和 Excel/HTML/PDF 报告路径。
 - `ProjectStore` 使用 UTF-8 JSON 和临时文件替换方式原子保存，不修改源数据。
 - `Finding`、`EvidenceLocation`、`ScanIssue` 和 `ScanResult` 作为 UI 与引擎之间的稳定对象。
 - Finding ID 根据规则与位置生成确定性指纹。
-- `ScanResult` 记录算法版本和扫描完成时间；项目加载可恢复结果、问题、置信度、证据详情和人工复核状态。
+- `ScanResult` 记录算法版本、扫描完成时间和可选 performance schema 1；项目加载可恢复结果、问题、置信度、证据详情、人工复核状态和性能画像。
 - 局部图像结果在 `Finding.details` 中记录两侧匹配矩形、覆盖率、关键点/内点统计、重投影误差、几何模型、尺度和旋转，供项目恢复、报告和证据 UI 共用。
 - Western blot 结果记录两侧面板框、条带框、极性、翻转/旋转、条带结构、排列几何、背景纹理和掩膜重叠证据。
 - Dot blot 结果记录两侧阵列框、检出/匹配斑点数、归一化水平排列误差、相似度和允许的裁剪/缩放/对比度变换。
 - 荧光结果记录正常/疑似关系、通道角色、实际匹配通道、两侧区域、结构、前景掩膜、互信息、配准位移和变换。
 - 病理结果记录正常/疑似关系、两侧组织区域、倍率、估算尺度比、组织占比、结构、组织掩膜、指纹距离和变换。
-- 版本 1–5 项目清单会在内存中迁移为版本 6；缺失的图片内容类型默认使用 `auto`，其他缺失结果、报告、片段设置、单条带开关和 Excel 高级参数使用相应默认值，下一次保存写为版本 6。
+- 版本 1–6 项目清单会在内存中迁移为版本 7；缺失的图片内容类型默认使用 `auto`，其他缺失结果、报告、片段设置、单条带开关和 Excel 高级参数使用相应默认值，旧扫描的性能画像保持为空，下一次保存写为版本 7。
+- performance schema 1 记录 CPU/GPU 运行环境、实际后端、加速器状态、墙钟/有效/暂停时间和稳定阶段 ID 的耗时、调用次数及处理项数。画像不记录源路径或结果证据；JSON 诊断另记录软件/算法版本和扫描数量统计。
 - `Finding.details` 支持递归 JSON 证据；Excel 片段/近似结果保存逐单元格完整值，序列、区域、运算和统计关系保存逐位置配对值、关系结果、拟合或汇总参数。
 
 输入路径、图片内容类型、连续数字片段最短位数、Western blot 单条带开关或任一 Excel 高级参数变化会使最近扫描结果失效，防止导出与当前输入/参数不一致的旧结果。图片内容类型取 `auto/generic/western_blot/dot_blot/fluorescence/pathology` 之一。当前 `.mic-project.json` 仍是开发阶段清单格式，不等同于 PRD 中最终的可移植项目包，也尚未缓存图片特征。
@@ -32,7 +33,7 @@
 - ScanTask：扫描阶段、参数、进度、资源、断点和错误。
 - Finding：结果类型、规则、风险、分数和证据。
 - FindingGroup：互相关联的多个对象组成的重复组。
-- `Finding.review_status`：`pending/confirmed/false_positive/normal`，分别对应未标记、准确、误报和正常关联；随现有 schema 6 扫描结果保存，不需要额外项目格式升级。
+- `Finding.review_status`：`pending/confirmed/false_positive/normal`，分别对应未标记、准确、误报和正常关联；继续随扫描结果保存。
 - Feedback export schema 1：Excel/JSON 清单只包含已标记结果，记录软件/算法版本、项目标识、结果 ID、规则、风险、位置和结构化证据；不复制原始文件。
 - HistoryEntry：历史库来源、指纹、特征和可选反馈标记。
 - Report：格式、筛选范围、生成版本和文件位置。

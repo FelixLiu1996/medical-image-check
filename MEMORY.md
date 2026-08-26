@@ -4,17 +4,17 @@
 
 ## 当前目标
 
-在不改变查重算法的前提下完成轻量人工反馈：准确/误报/正常关联、清除标记、状态筛选、项目保存/重扫继承和 Excel/JSON 清单。当前目标是完成 `codex/lightweight-review-feedback` 的全量验证、文档和推送。
+在不改变查重算法的前提下建立 GPU 性能画像：记录图片、专项算法和 Excel 各阶段耗时，探测 NVIDIA/OpenCV CUDA 环境，并导出不含原始数据、路径或查重证据的性能诊断。当前开发分支为 `codex/gpu-performance-profiling`；本阶段不启用 GPU 计算。
 
 ## 当前状态
 
 - 用户已确认 `docs/PRD.md` 0.1 并授权开始初版开发。
 - 已建立跨窗口开发治理文档。
 - 本地 Git 已绑定远程仓库 `origin`：`https://github.com/FelixLiu1996/medical-image-check.git`。
-- `codex/alpha-feedback-fixes` 已快进合并并推送到 `main`；当前开发分支为 `codex/lightweight-review-feedback`。
+- 轻量反馈功能提交已快进合并并推送到 `main`（`2d9ea57`），开发分支和 main 必需 CI 均通过；当前开发分支为 `codex/gpu-performance-profiling`。
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
 - 已实现项目 UI 生命周期、扫描结果持久化、三种本地报告、图片文件/解码像素重复、整体感知近似、局部几何重叠、Western/荧光/病理专项，以及 Excel 精确/片段/近似/运算/结构/稳健线性/统计规则和 CI。
-- 项目清单已升级为 schema 6，并兼容读取 schema 1–5；保存图片内容类型、连续数字片段、Western blot 单条带开关及 Excel 容差、运算目标和连续风险阈值。
+- 项目清单已升级为 schema 7，并兼容读取 schema 1–6；除既有设置和结果外，可选保存 performance schema 1 性能画像，旧项目加载后性能画像为空。
 - 已建立 Windows portable 工作流和 ADR-0003，并通过 GitHub Windows runner 构建、冒烟及下载校验。
 - 已实现 Western blot 明暗条带/面板候选、分段索引、结构/几何/背景/掩膜验证、同图 Copy-Move 和可选单条带低风险检测。
 - 已实现荧光通道/合并角色、同视野配准、Merge 成分正常关系和同通道疑似复用基线。
@@ -35,7 +35,10 @@
 - 已支持只导出已标记项的 Excel/JSON 算法反馈清单；包含算法版本、规则、位置和结构化证据，不复制原始文件。
 - 功能分支统一使用 `<agent-name>/<feature-name>` 命名，例如 `codex/lightweight-review-feedback`。
 - 开发分支触发 CI/打包后采用非阻断监控：主对话可继续；成功简要记录，失败必须反馈工作流、Job/步骤、关键错误、原因判断和建议修复，合并/标签/发布前确认最新提交的必需 run 全部成功。
-- 本地开发版本为 `0.1.0a11`，扫描算法版本保持 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
+- 已实现低侵入的扫描阶段计时和暂停时间扣除，覆盖输入收集、图片解码、通用/Western/Dot blot/荧光/病理特征与验证、Excel 读取和各规则阶段。
+- 已实现只读运行环境探测：固定参数且不经过 shell 调用 `nvidia-smi`，并查询 OpenCV CUDA 设备数；探测失败不影响扫描，当前选择后端始终为 CPU。
+- GUI 已增加“导出性能诊断”，JSON 包含软件/算法版本、机器/GPU 信息和阶段耗时，不包含原始文件、输入路径、查重位置或结构化证据。
+- 本地开发版本为 `0.1.0a12`，扫描算法版本保持 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
 
 ## 已确认的重要方向
 
@@ -43,6 +46,7 @@
 - 面向基础医学实验研究团队，不考虑临床试验和医疗数据安全合规功能。
 - 图像和 Excel 查重完全本地运行，不接入大模型 API。
 - CPU 必须兼容，GPU 只用于加速。
+- 首个真实 GPU 参考环境为 Windows 10/11 + NVIDIA GeForce RTX 3080 Ti；该型号不是最低配置。主要开发电脑是 macOS ARM64，不影响接口、CPU 回退和模拟探测开发，但不能替代真实 CUDA 验证。
 - 第一版图像专项优先级：Western blot、荧光图、普通病理图。
 - 第一版常规静态图片通用查重；不支持 PDF、Word、PPT、DICOM、超大切片和视频。
 - Excel 支持 xlsx、xls、xlsm、csv，默认扫描全部工作表。
@@ -57,7 +61,8 @@
 
 - 图像和 Excel 验收样例数据待用户向团队确认后提供。
 - 算法准确率和最终阈值需依据验收数据校准。
-- 历史库持久化和 GPU 后端仍需单独 ADR。
+- 历史库持久化仍需单独 ADR；GPU 已通过 ADR-0005 确认“先性能画像、后后端选择”，真正 CUDA 后端仍未实现。
+- RTX 3080 Ti 参考机的驱动版本、`nvidia-smi` 探测结果和真实性能诊断尚待 Windows portable 实机回传。
 - 三种导出报告是否增加“左右原表有限上下文 + 黄色命中高亮”仍待与试用用户讨论；当前仅 GUI 支持，Excel 报告输出结构化数值证据，HTML/PDF 输出位置和关系。确认支持范围、上下文大小和证据数量上限前不得开始开发。
 - Windows portable 已通过 GitHub Windows runner 构建与打包冒烟；干净 Windows 10/11 实机人工操作仍待验证。
 - 局部图像裁剪/重叠和 Western/荧光/病理三个专项基线已实现；通用单图 Copy-Move、可调整多面板拆分、荧光实验组语义和病理连续切片语义尚未实现。
@@ -66,10 +71,10 @@
 
 ## 下一步
 
-1. 完成并推送 `codex/lightweight-review-feedback`，确认 Windows/Linux CI 和 Windows portable。
-2. 在干净 Windows 10/11 实机验证轻量反馈、项目自动保存、反馈清单，以及表格证据区、Dot blot 和三种报告。
-3. 使用授权 Western/Dot blot/荧光/病理及 Excel 独立正负例校准算法。
-4. 后续再设计自动识别/手动框选、持久化任务断点、历史库和 GPU 后端。
+1. 完成并推送 `codex/gpu-performance-profiling`，确认 Windows/Linux CI 和 Windows portable。
+2. 在 RTX 3080 Ti 参考机上分别扫描有代表性的图片和 Excel 输入并导出 JSON 性能诊断；同时保留 CPU 基线、驱动信息和软件版本。
+3. 根据画像确定首批值得迁移的阶段，再以新 ADR 选择 CUDA 后端、依赖分发和 CPU/GPU 一致性策略；不能在画像前承诺加速比例。
+4. 使用授权 Western/Dot blot/荧光/病理及 Excel 独立正负例校准算法；GPU 实现不得改变候选语义和阈值。
 
 ## 验证状态
 
@@ -78,13 +83,15 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：101 项通过，新增轻量反馈、重扫继承、项目恢复、状态筛选和 Excel/JSON 清单测试。
+- `pytest`：110 项通过；新增计时累积/暂停扣除、NVIDIA/OpenCV CUDA 探测失败隔离、项目迁移、诊断隐私和 GUI 导出测试。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - `0.1.0a9` Qt offscreen 首页、图片和数据工作区截图检查通过；图片页使用可滚动工作区避免低高度窗口挤掉导航。
 - `0.1.0a11` 轻量反馈结果区 Qt offscreen 截图检查通过；wheel、打包程序三报告冒烟、许可证收集和 `pyside6-deploy --dry-run` 本地通过。
+- `0.1.0a12` 在 macOS ARM64 完成真实小图片扫描画像：正确识别 Darwin/ARM64、CPU 后端和无 NVIDIA 环境，并生成阶段耗时；未使用或写入真实实验数据。
+- `0.1.0a12` Qt offscreen 1024×720 与 1280×900 布局检查通过；wheel 构建、打包程序三报告冒烟、许可证收集、源码编译和 `pyside6-deploy --dry-run` 本地通过。
 - 4 张真实同源 Dot blot 本地只读回归输出全部 6 组两两关系，未出现 Western blot/病理串类，约 0.53 秒；样例未入库。
 - 13 个真实 Excel 工作簿本地只读回归由修复前 9,864 条降至 1,802 条，零乘积为 0 且已知阳性保留，约 6.31 秒；样例未入库。
 - 双入口 GUI 源码 CI Windows/Linux run `32862204165` 通过；Windows portable run `32862205003` 完成 standalone、打包程序三报告冒烟、许可证收集、ZIP 组装和上传，总耗时 24 分 39 秒，工件 92.3 MB，artifact digest `9507b3b0998fb51cde1e48bdd1da1a880735ffd38a1dbe1583a47652edd7fd23`。

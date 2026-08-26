@@ -14,6 +14,11 @@ from medical_image_check.domain.models import (
     RiskLevel,
     ScanResult,
 )
+from medical_image_check.domain.performance import (
+    RuntimeEnvironment,
+    ScanPerformance,
+    StageTiming,
+)
 from medical_image_check.services.basic_scan import ScanMode
 from medical_image_check.ui.main_window import MainWindow
 
@@ -171,6 +176,43 @@ def test_main_window_marks_filters_persists_and_exports_feedback(tmp_path: Path)
 
     window.close()
     restored.close()
+    app.processEvents()
+
+
+def test_main_window_exports_performance_diagnostic(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    performance = ScanPerformance(
+        schema_version=1,
+        selected_backend="cpu",
+        accelerator_status="no_nvidia_gpu_detected",
+        wall_seconds=1.25,
+        active_seconds=1.25,
+        paused_seconds=0,
+        stages=(StageTiming("image.generic_features", 1.0, 1, 2),),
+        environment=RuntimeEnvironment(
+            "Darwin",
+            "test",
+            "arm64",
+            "test-cpu",
+            8,
+            "3.12.13",
+            "4.14.0",
+        ),
+    )
+    result = ScanResult(2, 2, 0, (), performance=performance)
+
+    window = MainWindow()
+    window.create_project("性能诊断")
+    window._show_result(result)
+
+    assert window._performance_export_button.isEnabled()
+    assert "有效用时 1.25 秒" in window._status.text()
+    output = window.export_performance_diagnostic(tmp_path / "diagnostic")
+    assert output.name == "diagnostic.json"
+    assert output.exists()
+
+    window._dirty = False
+    window.close()
     app.processEvents()
 
 

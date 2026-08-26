@@ -16,7 +16,7 @@ from medical_image_check.domain.excel_settings import (
 from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import ScanResult
 
-PROJECT_SCHEMA_VERSION = 6
+PROJECT_SCHEMA_VERSION = 7
 DEFAULT_MINIMUM_DIGIT_RUN = 4
 
 

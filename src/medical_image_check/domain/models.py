@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 
+from medical_image_check.domain.performance import ScanPerformance
+
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 
 
@@ -86,6 +88,7 @@ class ScanResult:
     issues: tuple[ScanIssue, ...] = ()
     algorithm_version: str = "exact-baseline-1"
     completed_at: str | None = None
+    performance: ScanPerformance | None = None
 
 
 def deterministic_finding_id(rule_id: str, locations: tuple[EvidenceLocation, ...]) -> str:

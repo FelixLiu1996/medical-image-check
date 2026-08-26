@@ -4,7 +4,8 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
+from time import perf_counter
 
 from medical_image_check.domain.excel_settings import (
     DEFAULT_EXCEL_ABSOLUTE_TOLERANCE,
@@ -23,6 +24,12 @@ from medical_image_check.engines.image_exact import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from medical_image_check.engines.image_similarity import ImageDuplicateDetector
+from medical_image_check.infrastructure.performance import (
+    PerformanceRecorder,
+    detect_runtime_environment,
+    profile_stage,
+    record_items,
+)
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
@@ -45,6 +52,9 @@ class ScanControl:
         self._cancelled = Event()
         self._running = Event()
         self._running.set()
+        self._pause_lock = Lock()
+        self._pause_started_at: float | None = None
+        self._completed_pause_seconds = 0.0
 
     @property
     def cancelled(self) -> bool:
@@ -54,16 +64,36 @@ class ScanControl:
     def paused(self) -> bool:
         return not self._running.is_set() and not self.cancelled
 
+    @property
+    def paused_seconds(self) -> float:
+        with self._pause_lock:
+            total = self._completed_pause_seconds
+            if self._pause_started_at is not None:
+                total += max(0.0, perf_counter() - self._pause_started_at)
+            return total
+
     def pause(self) -> None:
         if not self.cancelled:
+            with self._pause_lock:
+                if self._pause_started_at is None:
+                    self._pause_started_at = perf_counter()
             self._running.clear()
 
     def resume(self) -> None:
+        self._finish_pause()
         self._running.set()
 
     def cancel(self) -> None:
+        self._finish_pause()
         self._cancelled.set()
         self._running.set()
+
+    def _finish_pause(self) -> None:
+        with self._pause_lock:
+            if self._pause_started_at is None:
+                return
+            self._completed_pause_seconds += max(0.0, perf_counter() - self._pause_started_at)
+            self._pause_started_at = None
 
     def checkpoint(self) -> None:
         if self.cancelled:
@@ -141,8 +171,12 @@ class BasicScanService:
         control: ScanControl | None = None,
     ) -> ScanResult:
         scan_control = control or ScanControl()
+        environment = detect_runtime_environment()
+        profiler = PerformanceRecorder(lambda: scan_control.paused_seconds)
         scan_control.checkpoint()
-        files = self.collect_supported_files(sources, scan_control.checkpoint)
+        with profile_stage(profiler, "source.collect"):
+            files = self.collect_supported_files(sources, scan_control.checkpoint)
+        record_items(profiler, "source.collect", len(files))
         images = tuple(path for path in files if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS)
         spreadsheets = tuple(
             path for path in files if path.suffix.lower() in SUPPORTED_SPREADSHEET_EXTENSIONS
@@ -167,6 +201,7 @@ class BasicScanService:
                 images,
                 mark_complete,
                 scan_control.checkpoint,
+                profiler,
             )
         scan_control.checkpoint()
         if progress and images and self.scan_mode == ScanMode.ALL:
@@ -178,19 +213,24 @@ class BasicScanService:
                 spreadsheets,
                 mark_complete,
                 scan_control.checkpoint,
+                profiler,
             )
         scan_control.checkpoint()
         if progress:
             progress(completed, total, "正在整理扫描结果")
-        findings = [*image_findings, *excel_findings]
-        findings.sort(
-            key=lambda item: (
-                item.risk != "high",
-                item.risk != "medium",
-                -int(item.details.get("matched_count", item.details.get("matched_spot_count", 0))),
-                item.finding_id,
+        with profile_stage(profiler, "result.sort"):
+            findings = [*image_findings, *excel_findings]
+            findings.sort(
+                key=lambda item: (
+                    item.risk != "high",
+                    item.risk != "medium",
+                    -int(
+                        item.details.get("matched_count", item.details.get("matched_spot_count", 0))
+                    ),
+                    item.finding_id,
+                )
             )
-        )
+        record_items(profiler, "result.sort", len(findings))
         return ScanResult(
             source_count=len(files),
             image_count=len(images),
@@ -199,4 +239,5 @@ class BasicScanService:
             issues=tuple([*image_issues, *excel_issues]),
             algorithm_version=ALGORITHM_VERSION,
             completed_at=datetime.now(UTC).isoformat(),
+            performance=profiler.finish(environment),
         )

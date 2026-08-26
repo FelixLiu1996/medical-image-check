@@ -21,6 +21,12 @@ from medical_image_check.domain.models import (
     ScanIssue,
     ScanResult,
 )
+from medical_image_check.domain.performance import (
+    GpuDevice,
+    RuntimeEnvironment,
+    ScanPerformance,
+    StageTiming,
+)
 from medical_image_check.domain.project import PROJECT_SCHEMA_VERSION, Project
 
 
@@ -140,6 +146,9 @@ def _scan_result_to_dict(result: ScanResult) -> dict[str, object]:
         ],
         "algorithm_version": result.algorithm_version,
         "completed_at": result.completed_at,
+        "performance": (
+            _performance_to_dict(result.performance) if result.performance is not None else None
+        ),
     }
 
 
@@ -181,6 +190,124 @@ def _scan_result_from_dict(payload: object) -> ScanResult:
         issues=tuple(_issue_from_dict(item) for item in issues_payload),
         algorithm_version=str(payload.get("algorithm_version", "exact-baseline-1")),
         completed_at=(str(payload["completed_at"]) if payload.get("completed_at") else None),
+        performance=(
+            _performance_from_dict(payload["performance"])
+            if payload.get("performance") is not None
+            else None
+        ),
+    )
+
+
+def _performance_to_dict(performance: ScanPerformance) -> dict[str, object]:
+    environment = performance.environment
+    return {
+        "schema_version": performance.schema_version,
+        "selected_backend": performance.selected_backend,
+        "accelerator_status": performance.accelerator_status,
+        "wall_seconds": performance.wall_seconds,
+        "active_seconds": performance.active_seconds,
+        "paused_seconds": performance.paused_seconds,
+        "stages": [
+            {
+                "stage_id": stage.stage_id,
+                "duration_seconds": stage.duration_seconds,
+                "calls": stage.calls,
+                "items": stage.items,
+            }
+            for stage in performance.stages
+        ],
+        "environment": {
+            "operating_system": environment.operating_system,
+            "os_release": environment.os_release,
+            "machine": environment.machine,
+            "processor": environment.processor,
+            "logical_cpu_count": environment.logical_cpu_count,
+            "python_version": environment.python_version,
+            "opencv_version": environment.opencv_version,
+            "nvidia_gpus": [
+                {
+                    "name": device.name,
+                    "driver_version": device.driver_version,
+                    "memory_total_mb": device.memory_total_mb,
+                }
+                for device in environment.nvidia_gpus
+            ],
+            "nvidia_probe_error": environment.nvidia_probe_error,
+            "opencv_cuda_device_count": environment.opencv_cuda_device_count,
+            "opencv_cuda_probe_error": environment.opencv_cuda_probe_error,
+        },
+    }
+
+
+def _performance_from_dict(payload: object) -> ScanPerformance:
+    if not isinstance(payload, dict):
+        raise ValueError("项目文件中的性能画像无效")
+    stages_payload = payload.get("stages", [])
+    environment_payload = payload.get("environment")
+    if not isinstance(stages_payload, list) or not isinstance(environment_payload, dict):
+        raise ValueError("项目文件中的性能画像列表无效")
+    gpu_payload = environment_payload.get("nvidia_gpus", [])
+    if not isinstance(gpu_payload, list):
+        raise ValueError("项目文件中的 GPU 列表无效")
+    environment = RuntimeEnvironment(
+        operating_system=str(environment_payload.get("operating_system", "unknown")),
+        os_release=str(environment_payload.get("os_release", "unknown")),
+        machine=str(environment_payload.get("machine", "unknown")),
+        processor=str(environment_payload.get("processor", "unknown")),
+        logical_cpu_count=(
+            int(environment_payload["logical_cpu_count"])
+            if environment_payload.get("logical_cpu_count") is not None
+            else None
+        ),
+        python_version=str(environment_payload.get("python_version", "unknown")),
+        opencv_version=str(environment_payload.get("opencv_version", "unknown")),
+        nvidia_gpus=tuple(_gpu_from_dict(item) for item in gpu_payload),
+        nvidia_probe_error=(
+            str(environment_payload["nvidia_probe_error"])
+            if environment_payload.get("nvidia_probe_error") is not None
+            else None
+        ),
+        opencv_cuda_device_count=int(environment_payload.get("opencv_cuda_device_count", 0)),
+        opencv_cuda_probe_error=(
+            str(environment_payload["opencv_cuda_probe_error"])
+            if environment_payload.get("opencv_cuda_probe_error") is not None
+            else None
+        ),
+    )
+    return ScanPerformance(
+        schema_version=int(payload.get("schema_version", 1)),
+        selected_backend=str(payload.get("selected_backend", "cpu")),
+        accelerator_status=str(payload.get("accelerator_status", "unknown")),
+        wall_seconds=float(payload.get("wall_seconds", 0)),
+        active_seconds=float(payload.get("active_seconds", 0)),
+        paused_seconds=float(payload.get("paused_seconds", 0)),
+        stages=tuple(_stage_from_dict(item) for item in stages_payload),
+        environment=environment,
+    )
+
+
+def _gpu_from_dict(payload: object) -> GpuDevice:
+    if not isinstance(payload, dict):
+        raise ValueError("项目文件中的 GPU 信息无效")
+    return GpuDevice(
+        name=str(payload.get("name", "unknown")),
+        driver_version=(
+            str(payload["driver_version"]) if payload.get("driver_version") is not None else None
+        ),
+        memory_total_mb=(
+            int(payload["memory_total_mb"]) if payload.get("memory_total_mb") is not None else None
+        ),
+    )
+
+
+def _stage_from_dict(payload: object) -> StageTiming:
+    if not isinstance(payload, dict):
+        raise ValueError("项目文件中的性能阶段无效")
+    return StageTiming(
+        stage_id=str(payload.get("stage_id", "unknown")),
+        duration_seconds=float(payload.get("duration_seconds", 0)),
+        calls=int(payload.get("calls", 0)),
+        items=int(payload.get("items", 0)),
     )
 
 

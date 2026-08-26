@@ -62,6 +62,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - GUI 证据预览支持聚焦两侧图片匹配区域、Excel 两侧原表上下文/命中高亮和一键复制证据摘要；
 - 候选结果支持可选的“准确、误报、正常关联”一键标记、状态筛选和清除标记；反馈随项目本地保存，同一算法版本的稳定结果重新扫描时继承；
 - 支持导出只包含已标记结果的 Excel/JSON 算法反馈清单，记录算法版本、规则、位置和结构化证据，不复制原始图片或表格；
+- 扫描记录图片解码、通用/专项特征、候选验证和 Excel 规则等分阶段耗时，探测 NVIDIA GPU/OpenCV CUDA 状态，并可导出不含原始路径和证据的 JSON 性能诊断；
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
