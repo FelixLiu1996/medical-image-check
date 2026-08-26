@@ -34,6 +34,7 @@
 - 结果区已支持可选的准确/误报/正常关联标记、清除和状态筛选；标记随项目保存，同一算法版本的相同 `finding_id` 重扫时继承，不自动训练、上传或修改阈值。
 - 已支持只导出已标记项的 Excel/JSON 算法反馈清单；包含算法版本、规则、位置和结构化证据，不复制原始文件。
 - 功能分支统一使用 `<agent-name>/<feature-name>` 命名，例如 `codex/lightweight-review-feedback`。
+- 开发分支触发 CI/打包后采用非阻断监控：主对话可继续；成功简要记录，失败必须反馈工作流、Job/步骤、关键错误、原因判断和建议修复，合并/标签/发布前确认最新提交的必需 run 全部成功。
 - 本地开发版本为 `0.1.0a11`，扫描算法版本保持 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
 
 ## 已确认的重要方向
