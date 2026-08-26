@@ -47,8 +47,19 @@ from medical_image_check.domain.image_settings import (
     IMAGE_ANALYSIS_MODE_LABELS,
     ImageAnalysisMode,
 )
-from medical_image_check.domain.models import EvidenceLocation, Finding, RiskLevel, ScanResult
+from medical_image_check.domain.models import (
+    EvidenceLocation,
+    Finding,
+    ReviewStatus,
+    RiskLevel,
+    ScanResult,
+)
 from medical_image_check.domain.project import Project
+from medical_image_check.domain.review import (
+    carry_forward_review_status,
+    marked_findings,
+    update_finding_review_status,
+)
 from medical_image_check.engines.excel_exact import SUPPORTED_SPREADSHEET_EXTENSIONS
 from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
@@ -60,12 +71,15 @@ from medical_image_check.services.basic_scan import (
     ScanMode,
 )
 from medical_image_check.services.excel_report import ExcelReportExporter
+from medical_image_check.services.feedback_export import FeedbackExporter
 from medical_image_check.services.html_report import HtmlReportExporter
 from medical_image_check.services.pdf_report import PdfReportExporter
+from medical_image_check.services.report_common import REVIEW_LABELS
 
 PROJECT_FILTER = "医学查重项目 (*.mic-project.json)"
 IMAGE_FILE_FILTER = "支持的图片 (*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff)"
 DATA_FILE_FILTER = "支持的表格 (*.xlsx *.xls *.xlsm *.csv)"
+FEEDBACK_FILE_FILTER = "Excel 反馈清单 (*.xlsx);;JSON 反馈清单 (*.json)"
 RISK_LABELS = {
     RiskLevel.HIGH: "高",
     RiskLevel.MEDIUM: "中",
@@ -365,12 +379,14 @@ class MainWindow(QMainWindow):
         self._current_result: ScanResult | None = None
         self._result_before_scan: ScanResult | None = None
         self._rendered_findings: list[Finding] = []
+        self._selected_finding_id: str | None = None
         self._close_after_scan = False
         self._dirty = False
         self._project_store = ProjectStore()
         self._report_exporter = ExcelReportExporter()
         self._html_report_exporter = HtmlReportExporter()
         self._pdf_report_exporter = PdfReportExporter()
+        self._feedback_exporter = FeedbackExporter()
         self._build_ui()
         self._update_project_state()
 
@@ -418,10 +434,13 @@ class MainWindow(QMainWindow):
         self._save_button.setToolTip("保存当前输入、参数和最近结果")
         self._export_button = QPushButton("导出报告")
         self._export_button.setProperty("role", "primary")
+        self._feedback_export_button = QPushButton("导出反馈")
+        self._feedback_export_button.setToolTip("只导出已标记为准确、误报或正常关联的结果")
         top_bar_layout.addWidget(self._new_project_button)
         top_bar_layout.addWidget(self._open_project_button)
         top_bar_layout.addWidget(self._save_button)
         top_bar_layout.addWidget(self._export_button)
+        top_bar_layout.addWidget(self._feedback_export_button)
         layout.addWidget(top_bar)
 
         self._project_label = QLabel()
@@ -442,6 +461,7 @@ class MainWindow(QMainWindow):
         self._open_project_button.clicked.connect(self._open_project_dialog)
         self._save_button.clicked.connect(self._save_current_project)
         self._export_button.clicked.connect(self._export_report_dialog)
+        self._feedback_export_button.clicked.connect(self._export_feedback_dialog)
         self._add_files_button.clicked.connect(self._select_files)
         self._add_folder_button.clicked.connect(self._select_folder)
         self._clear_sources_button.clicked.connect(self._clear_sources)
@@ -459,6 +479,19 @@ class MainWindow(QMainWindow):
         self._excel_medium_run_spin.editingFinished.connect(self._excel_settings_changed)
         self._excel_high_run_spin.editingFinished.connect(self._excel_settings_changed)
         self._results.cellClicked.connect(self._show_selected_evidence)
+        self._review_filter_combo.currentIndexChanged.connect(self._review_filter_changed)
+        self._review_confirm_button.clicked.connect(
+            lambda: self._set_selected_review_status(ReviewStatus.CONFIRMED)
+        )
+        self._review_false_positive_button.clicked.connect(
+            lambda: self._set_selected_review_status(ReviewStatus.FALSE_POSITIVE)
+        )
+        self._review_normal_button.clicked.connect(
+            lambda: self._set_selected_review_status(ReviewStatus.NORMAL)
+        )
+        self._review_clear_button.clicked.connect(
+            lambda: self._set_selected_review_status(ReviewStatus.PENDING)
+        )
         self._crop_evidence_check.toggled.connect(self._toggle_evidence_crop)
         self._copy_evidence_button.clicked.connect(self._copy_evidence_summary)
         self.setCentralWidget(central)
@@ -678,8 +711,32 @@ class MainWindow(QMainWindow):
 
         self._results_group = QGroupBox("候选结果")
         results_layout = QVBoxLayout(self._results_group)
-        self._results = QTableWidget(0, 4)
-        self._results.setHorizontalHeaderLabels(["风险", "类型", "说明", "位置"])
+        review_toolbar = QHBoxLayout()
+        review_toolbar.addWidget(QLabel("复核状态："))
+        self._review_filter_combo = QComboBox()
+        self._review_filter_combo.addItem("全部", "all")
+        for status in ReviewStatus:
+            self._review_filter_combo.addItem(REVIEW_LABELS[status], status.value)
+        review_toolbar.addWidget(self._review_filter_combo)
+        self._review_summary_label = QLabel("尚无结果")
+        self._review_summary_label.setStyleSheet("color: #66758c;")
+        review_toolbar.addWidget(self._review_summary_label)
+        review_toolbar.addStretch(1)
+        self._review_confirm_button = QPushButton("准确")
+        self._review_false_positive_button = QPushButton("误报")
+        self._review_normal_button = QPushButton("正常关联")
+        self._review_clear_button = QPushButton("清除标记")
+        for button in (
+            self._review_confirm_button,
+            self._review_false_positive_button,
+            self._review_normal_button,
+            self._review_clear_button,
+        ):
+            button.setEnabled(False)
+            review_toolbar.addWidget(button)
+        results_layout.addLayout(review_toolbar)
+        self._results = QTableWidget(0, 5)
+        self._results.setHorizontalHeaderLabels(["风险", "类型", "复核", "说明", "位置"])
         self._results.horizontalHeader().setStretchLastSection(True)
         self._results.verticalHeader().setVisible(False)
         self._results.setAlternatingRowColors(True)
@@ -830,6 +887,7 @@ class MainWindow(QMainWindow):
             ("保存项目", QKeySequence.StandardKey.Save, self._save_current_project),
             ("项目另存为", QKeySequence.StandardKey.SaveAs, self._save_project_as),
             ("导出报告…", "Ctrl+E", self._export_report_dialog),
+            ("导出反馈清单…", "Ctrl+Shift+E", self._export_feedback_dialog),
         ]
         for text, shortcut, callback in actions:
             action = QAction(text, self)
@@ -945,6 +1003,15 @@ class MainWindow(QMainWindow):
             raise ValueError("请先完成或打开一次扫描结果")
         output = self._pdf_report_exporter.export(result, path, self._project)
         self._record_report(output, "PDF")
+        return output
+
+    def export_feedback(self, path: str | Path) -> Path:
+        result = self._result_for_active_mode()
+        if self._project is None or result is None:
+            raise ValueError("请先完成或打开一次扫描结果")
+        output = self._feedback_exporter.export(result, path, self._project)
+        count = len(marked_findings(result))
+        self._status.setText(f"已导出 {count} 条人工反馈：{output}")
         return output
 
     def _record_report(self, output: Path, report_type: str) -> None:
@@ -1076,6 +1143,38 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "报告导出失败", str(exc))
             return
         QMessageBox.information(self, "导出完成", f"报告已保存到：\n{output}")
+
+    @Slot()
+    def _export_feedback_dialog(self) -> None:
+        result = self._result_for_active_mode()
+        if result is None or not marked_findings(result):
+            QMessageBox.information(
+                self,
+                "没有人工反馈",
+                "请先将至少一条结果标记为准确、误报或正常关联。",
+            )
+            return
+        project_name = self._project.name if self._project else "查重"
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出算法反馈清单",
+            f"{project_name}-算法反馈.xlsx",
+            FEEDBACK_FILE_FILTER,
+        )
+        if not path:
+            return
+        if selected_filter.startswith("JSON") and Path(path).suffix.lower() != ".json":
+            path = str(Path(path).with_suffix(".json"))
+        try:
+            output = self.export_feedback(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "反馈导出失败", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "导出完成",
+            f"反馈清单已保存到：\n{output}\n\n原始图片和表格没有复制到清单中。",
+        )
 
     @Slot()
     def _select_files(self) -> None:
@@ -1218,6 +1317,7 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _show_result(self, result: ScanResult) -> None:
+        result = carry_forward_review_status(self._result_before_scan, result)
         self._current_result = result
         self._render_result(result)
         if self._project is not None:
@@ -1247,9 +1347,16 @@ class MainWindow(QMainWindow):
         self._rendered_findings = []
         self._clear_evidence()
         if result is None:
+            self._review_summary_label.setText("尚无结果")
             return
+        active_findings = [
+            finding for finding in result.findings if self._finding_matches_mode(finding)
+        ]
+        review_filter = str(self._review_filter_combo.currentData())
         for finding in result.findings:
             if not self._finding_matches_mode(finding):
+                continue
+            if review_filter != "all" and finding.review_status.value != review_filter:
                 continue
             self._rendered_findings.append(finding)
             row = self._results.rowCount()
@@ -1258,11 +1365,51 @@ class MainWindow(QMainWindow):
             values = [
                 RISK_LABELS[finding.risk],
                 finding.title,
+                REVIEW_LABELS[finding.review_status],
                 finding.description,
                 locations,
             ]
             for column, value in enumerate(values):
                 self._results.setItem(row, column, QTableWidgetItem(value))
+        marked_count = sum(
+            finding.review_status != ReviewStatus.PENDING for finding in active_findings
+        )
+        self._review_summary_label.setText(
+            f"显示 {len(self._rendered_findings)} / {len(active_findings)}；已标记 {marked_count}"
+        )
+
+    @Slot(int)
+    def _review_filter_changed(self, index: int) -> None:
+        del index
+        self._render_result(self._current_result)
+
+    def _set_selected_review_status(self, status: ReviewStatus) -> None:
+        if self._current_result is None or self._selected_finding_id is None:
+            return
+        finding_id = self._selected_finding_id
+        updated = update_finding_review_status(self._current_result, finding_id, status)
+        if updated is self._current_result:
+            return
+        self._current_result = updated
+        if self._project is not None:
+            self._project = self._project.with_scan_result(updated)
+        self._mark_dirty()
+        self._render_result(updated)
+        selected_row = next(
+            (
+                row
+                for row, finding in enumerate(self._rendered_findings)
+                if finding.finding_id == finding_id
+            ),
+            None,
+        )
+        if selected_row is not None:
+            self._results.selectRow(selected_row)
+            self._show_selected_evidence(selected_row)
+        if self._project_path is not None:
+            self._save_current_project(silent=True)
+        self._status.setText(f"结果已标记为“{REVIEW_LABELS[status]}”，反馈仅保存在本地。")
+        self._update_project_state()
 
     def _finding_matches_mode(self, finding: Finding) -> bool:
         is_excel = finding.rule_id.startswith("excel.")
@@ -1313,6 +1460,8 @@ class MainWindow(QMainWindow):
             self._clear_evidence()
             return
         finding = self._rendered_findings[row]
+        self._selected_finding_id = finding.finding_id
+        self._set_review_controls(finding.review_status)
         if finding.rule_id.startswith("excel."):
             self._evidence_images_container.hide()
             self._spreadsheet_evidence_container.show()
@@ -1356,6 +1505,7 @@ class MainWindow(QMainWindow):
         self._copy_evidence_button.setEnabled(True)
 
     def _clear_evidence(self, message: str | None = None) -> None:
+        self._selected_finding_id = None
         self._evidence_images_container.setVisible(self._scan_mode == ScanMode.IMAGE)
         self._spreadsheet_evidence_container.setVisible(self._scan_mode == ScanMode.DATA)
         self._first_evidence.set_evidence(None)
@@ -1370,6 +1520,18 @@ class MainWindow(QMainWindow):
         self._evidence_summary.setText(message or default_message)
         self._crop_evidence_check.setEnabled(False)
         self._copy_evidence_button.setEnabled(False)
+        self._set_review_controls(None)
+
+    def _set_review_controls(self, status: ReviewStatus | None) -> None:
+        enabled = status is not None and self._thread is None
+        for button in (
+            self._review_confirm_button,
+            self._review_false_positive_button,
+            self._review_normal_button,
+            self._review_clear_button,
+        ):
+            button.setEnabled(enabled)
+        self._review_clear_button.setEnabled(enabled and status != ReviewStatus.PENDING)
 
     @Slot(bool)
     def _toggle_evidence_crop(self, enabled: bool) -> None:
@@ -1498,6 +1660,11 @@ class MainWindow(QMainWindow):
         self._clear_sources_button.setEnabled(not scan_running)
         self._scan_button.setEnabled(not scan_running)
         self._export_button.setEnabled(self._active_result_available() and not scan_running)
+        active_result = self._result_for_active_mode()
+        self._feedback_export_button.setEnabled(
+            active_result is not None and bool(marked_findings(active_result)) and not scan_running
+        )
+        self._review_filter_combo.setEnabled(self._current_result is not None and not scan_running)
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
         self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
         self._image_analysis_mode_combo.setEnabled(self._project is not None and not scan_running)

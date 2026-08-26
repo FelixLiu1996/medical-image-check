@@ -66,6 +66,10 @@
 - 增加 Dot blot 斑点阵列专项，支持裁剪、缩放、灰度/对比度变化后的排列复用候选；通用、Western blot、Dot blot、荧光和病理可自动路由或由用户明确指定。
 - 收紧自动模式的 Western blot/病理准入，并在专项证据存在时折叠同一图片对的通用重复结果，减少跨类型错误解释。
 - 项目清单升级为 schema 6，保存图片内容类型并兼容迁移 schema 1–5；开发版本升级为 `0.1.0a10`。
+- 结果区增加可选的“准确、误报、正常关联”标记、清除标记和复核状态筛选；不设置审核任务、完成率、审核人或强制备注。
+- 反馈复用 schema 6 的 `Finding.review_status` 随项目保存；同一算法版本的稳定结果重新扫描时按结果 ID 继承。
+- 增加 Excel/JSON 算法反馈清单，只导出已标记结果的版本、规则、位置和结构化证据，不复制原始文件。
+- 功能分支命名统一为 `<agent-name>/<feature-name>`，例如 `codex/lightweight-review-feedback`。
 
 ## 当前阶段结论
 
@@ -75,13 +79,13 @@
 - 本阶段 Windows/Linux CI、Windows standalone 编译、打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均已通过。
 - Excel 已确认数值规则的全局扫描 Alpha 基线已补齐；自动识别实验组与手动框选尚未进入当前 GUI。
 - 首轮反馈的两组问题已完成本地修复：13 个真实工作簿候选由 9,864 条降至 1,802 条且已知阳性保留；4 张同源 Dot blot 自动模式识别全部 6 组两两关系，未再输出 Western blot/病理串类结果。真实样例未进入仓库，样本量不足以作为准确率承诺。
-- 扫描算法升级为 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`，界面版本升级为 `0.1.0a10`。
+- 扫描算法保持 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`，轻量反馈界面版本升级为 `0.1.0a11`。
 - 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
 
 ## 下一步
 
-1. 推送首轮反馈修复分支并等待 Windows/Linux CI 与 Windows portable 完整验证。
-2. 在干净 Windows 10/11 实机复核表格证据布局、Dot blot 结果、三种报告和 PDF 字体/打印。
+1. 推送 `codex/lightweight-review-feedback` 并确认 Windows/Linux CI 与 Windows portable。
+2. 在干净 Windows 10/11 实机复核轻量标记、筛选、项目自动保存、反馈清单，以及既有表格证据和 Dot blot 结果。
 3. 获取 Western/Dot blot/荧光/病理及 Excel 独立正负例验收数据后校准阈值、候选上限和误报分层。
 4. 后续再推进自动识别/手动框选、持久化任务断点、历史库和 GPU 后端。
 
@@ -91,7 +95,6 @@
 - 算法准确率与阈值待样例校准。
 - GPU 后端和历史库仍需后续 ADR/验证。
 - 是否在 Excel、HTML、PDF 报告中增加左右原表上下文及黄色命中高亮，待与试用用户确认；当前只有 GUI 支持该预览，报告仍输出结构化位置和数值证据，暂不开发此增强。
-- 已确定未来采用可选的“准确/误报/正常关联”轻量算法反馈，用于本地离线调优；不建设强制人工审核闭环。该功能当前只记录需求，在 Alpha 已有问题修复前不开发。
 - 当前全局感知和局部几何阈值仅通过合成数据验证，不能作为准确率承诺。
 - 当前 Western blot 只对明显横向条带行形成自动面板，阈值仅通过合成数据验证；复杂排版、文字标签、弱条带和任意擦除/拼接仍可能漏检或误报。
 - 当前荧光基线依赖可分离颜色通道或文件名角色；未读取显微镜元数据、未建立实验组语义，不同通道结构差异大时可能漏检。
@@ -107,7 +110,6 @@
 - Windows 安装程序和正式 Release
 - 通用单图 Copy-Move、可手工调整的多面板拆分、荧光实验组语义和病理连续切片语义
 - Excel 自动识别实验组和手动框选扫描区域
-- 轻量算法反馈标记与反馈清单导出（已确认方向，暂缓开发）
 - 历史库和完整项目包
 
 ## 最新验证
@@ -115,12 +117,12 @@
 - Python 3.12.13
 - Ruff 检查与格式检查通过
 - `pip check` 通过
-- pytest 97 项通过；新增 Dot blot、图片专项路由、Excel 降噪/公平选取和原表高亮预览测试
+- pytest 101 项通过；新增轻量反馈更新/重扫继承、项目保存恢复、状态筛选和 Excel/JSON 清单测试
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过
 - Python wheel 构建与源码编译检查通过
-- `0.1.0a10` wheel 与打包程序三报告冒烟通过；Windows CI/portable 尚待本修复分支推送后确认。
+- `0.1.0a11` 轻量反馈结果区已通过 Qt offscreen 截图检查；wheel、打包程序三报告冒烟、许可证收集和 `pyside6-deploy --dry-run` 本地通过，远程 CI/portable 待分支推送后确认。
 - 4 张真实同源 Dot blot 本地只读回归：6 组两两关系全部输出，0 条 Western blot/病理串类，约 0.53 秒。
 - 13 个真实 Excel 工作簿本地只读回归：1,802 条候选、0 条零乘积关系、已知连续片段/配对和/重复数值阳性均保留，约 6.31 秒；修复前为 9,864 条。
 - `0.1.0a9` Qt offscreen 首页/图片/数据三页截图检查通过；900px 高窗口顶部导航稳定，工作区可滚动

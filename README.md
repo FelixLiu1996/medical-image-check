@@ -60,6 +60,8 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - 隐藏工作表扫描、公式缓存缺失提示和损坏文件隔离；
 - Excel、单文件 HTML 和 A4 PDF 三种本地报告；HTML 支持搜索/风险筛选和内嵌图像证据，PDF 支持中文归档、打印和图像证据；
 - GUI 证据预览支持聚焦两侧图片匹配区域、Excel 两侧原表上下文/命中高亮和一键复制证据摘要；
+- 候选结果支持可选的“准确、误报、正常关联”一键标记、状态筛选和清除标记；反馈随项目本地保存，同一算法版本的稳定结果重新扫描时继承；
+- 支持导出只包含已标记结果的 Excel/JSON 算法反馈清单，记录算法版本、规则、位置和结构化证据，不复制原始图片或表格；
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 

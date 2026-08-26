@@ -4,14 +4,14 @@
 
 ## 当前目标
 
-首轮 Windows Alpha 反馈中的 Excel 噪声/证据可读性和 Dot blot 漏检/专项串类问题已完成本地修复，当前目标是推送分支并通过远程 Windows/Linux CI 与 portable 验证。轻量算法反馈标记已经确认方向，但继续暂缓开发。
+在不改变查重算法的前提下完成轻量人工反馈：准确/误报/正常关联、清除标记、状态筛选、项目保存/重扫继承和 Excel/JSON 清单。当前目标是完成 `codex/lightweight-review-feedback` 的全量验证、文档和推送。
 
 ## 当前状态
 
 - 用户已确认 `docs/PRD.md` 0.1 并授权开始初版开发。
 - 已建立跨窗口开发治理文档。
 - 本地 Git 已绑定远程仓库 `origin`：`https://github.com/FelixLiu1996/medical-image-check.git`。
-- `codex/v0.1-foundation` 已快进合并到 `main`，并创建标签 `v0.1.0-alpha.9`；当前修复分支为 `codex/alpha-feedback-fixes`。
+- `codex/alpha-feedback-fixes` 已快进合并并推送到 `main`；当前开发分支为 `codex/lightweight-review-feedback`。
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
 - 已实现项目 UI 生命周期、扫描结果持久化、三种本地报告、图片文件/解码像素重复、整体感知近似、局部几何重叠、Western/荧光/病理专项，以及 Excel 精确/片段/近似/运算/结构/稳健线性/统计规则和 CI。
 - 项目清单已升级为 schema 6，并兼容读取 schema 1–5；保存图片内容类型、连续数字片段、Western blot 单条带开关及 Excel 容差、运算目标和连续风险阈值。
@@ -31,7 +31,10 @@
 - 图片内容类型支持 `auto/generic/western_blot/dot_blot/fluorescence/pathology`，自动模式收紧 Western blot/病理准入，明确模式只运行对应专项；通用检测始终运行。
 - 新增 Dot blot 斑点排列专项和结构化证据，能处理裁剪、缩放、灰度/对比度差异；专项结果存在时折叠同图片对的通用候选。
 - Excel 已增加全零/常量/身份运算/零乘积降噪、按证据强度排序以及跨工作簿/工作表公平选取；数据结果支持左右原工作表上下文和命中单元格高亮。
-- 本地开发版本为 `0.1.0a10`，扫描算法版本为 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
+- 结果区已支持可选的准确/误报/正常关联标记、清除和状态筛选；标记随项目保存，同一算法版本的相同 `finding_id` 重扫时继承，不自动训练、上传或修改阈值。
+- 已支持只导出已标记项的 Excel/JSON 算法反馈清单；包含算法版本、规则、位置和结构化证据，不复制原始文件。
+- 功能分支统一使用 `<agent-name>/<feature-name>` 命名，例如 `codex/lightweight-review-feedback`。
+- 本地开发版本为 `0.1.0a11`，扫描算法版本保持 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
 
 ## 已确认的重要方向
 
@@ -47,7 +50,7 @@
 - PySide6 按 LGPLv3 动态分发要求管理，最终发行前必须复核许可证材料。
 - 通用图像基线使用 NumPy/OpenCV，CPU 完整运行；感知近似只输出中/低风险候选。
 - Windows 免安装 Alpha 使用 `pyside6-deploy`/Nuitka standalone。Nuitka 编译器为 AGPLv3，目标程序 runtime 依赖其明确的 Runtime Library Exception，发行包必须保留该文本。
-- 不建设强制逐条处理、审核完成率、审核人或复杂状态流转。后续可选的轻量反馈仅提供“准确/误报/正常关联”一键标记，供本地离线算法调优；不自动训练、不自动改变阈值、不上传网络。该功能当前只记录需求，暂不开发。
+- 不建设强制逐条处理、审核完成率、审核人或复杂状态流转。轻量反馈仅提供“准确/误报/正常关联”一键标记，供本地离线算法调优；不自动训练、不自动改变阈值、不上传网络。
 
 ## 待定或阻塞
 
@@ -58,14 +61,14 @@
 - Windows portable 已通过 GitHub Windows runner 构建与打包冒烟；干净 Windows 10/11 实机人工操作仍待验证。
 - 局部图像裁剪/重叠和 Western/荧光/病理三个专项基线已实现；通用单图 Copy-Move、可调整多面板拆分、荧光实验组语义和病理连续切片语义尚未实现。
 - Western blot 当前只形成明显横向条带行候选，复杂排版、弱条带、文字标签、任意擦除/拼接仍待验收数据和后续算法覆盖。
-- Excel 已确认规则的全局扫描 Alpha 基线已实现；自动识别实验组和手动框选区域尚未实现。轻量算法反馈标记已确定方向但暂缓。新增结构/运算/统计规则每类最多保留 300 条，统计相似始终只标低风险。
+- Excel 已确认规则的全局扫描 Alpha 基线已实现；自动识别实验组和手动框选区域尚未实现。新增结构/运算/统计规则每类最多保留 300 条，统计相似始终只标低风险。
 
 ## 下一步
 
-1. 推送 `codex/alpha-feedback-fixes`，确认 Windows/Linux CI 和 Windows portable。
-2. 在干净 Windows 10/11 实机验证表格证据区、Dot blot、三种报告和 PDF 字体/打印。
+1. 完成并推送 `codex/lightweight-review-feedback`，确认 Windows/Linux CI 和 Windows portable。
+2. 在干净 Windows 10/11 实机验证轻量反馈、项目自动保存、反馈清单，以及表格证据区、Dot blot 和三种报告。
 3. 使用授权 Western/Dot blot/荧光/病理及 Excel 独立正负例校准算法。
-4. 后续再设计自动识别/手动框选、持久化任务断点、历史库、GPU 后端和轻量算法反馈。
+4. 后续再设计自动识别/手动框选、持久化任务断点、历史库和 GPU 后端。
 
 ## 验证状态
 
@@ -74,13 +77,13 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：97 项通过，包含图片类型路由、Dot blot、Excel 降噪/公平选取和原表高亮预览。
+- `pytest`：101 项通过，新增轻量反馈、重扫继承、项目恢复、状态筛选和 Excel/JSON 清单测试。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
 - `pyside6-deploy --dry-run` 和许可证收集：本地通过。
 - `0.1.0a9` Qt offscreen 首页、图片和数据工作区截图检查通过；图片页使用可滚动工作区避免低高度窗口挤掉导航。
-- `0.1.0a10` wheel、打包程序三报告冒烟、许可证收集和 `pyside6-deploy --dry-run` 本地通过。
+- `0.1.0a11` 轻量反馈结果区 Qt offscreen 截图检查通过；wheel、打包程序三报告冒烟、许可证收集和 `pyside6-deploy --dry-run` 本地通过。
 - 4 张真实同源 Dot blot 本地只读回归输出全部 6 组两两关系，未出现 Western blot/病理串类，约 0.53 秒；样例未入库。
 - 13 个真实 Excel 工作簿本地只读回归由修复前 9,864 条降至 1,802 条，零乘积为 0 且已知阳性保留，约 6.31 秒；样例未入库。
 - 双入口 GUI 源码 CI Windows/Linux run `32862204165` 通过；Windows portable run `32862205003` 完成 standalone、打包程序三报告冒烟、许可证收集、ZIP 组装和上传，总耗时 24 分 39 秒，工件 92.3 MB，artifact digest `9507b3b0998fb51cde1e48bdd1da1a880735ffd38a1dbe1583a47652edd7fd23`。

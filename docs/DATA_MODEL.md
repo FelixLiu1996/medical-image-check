@@ -32,7 +32,8 @@
 - ScanTask：扫描阶段、参数、进度、资源、断点和错误。
 - Finding：结果类型、规则、风险、分数和证据。
 - FindingGroup：互相关联的多个对象组成的重复组。
-- FeedbackMark：后续可选的准确、误报或正常关联轻量反馈；当前暂缓实现。
+- `Finding.review_status`：`pending/confirmed/false_positive/normal`，分别对应未标记、准确、误报和正常关联；随现有 schema 6 扫描结果保存，不需要额外项目格式升级。
+- Feedback export schema 1：Excel/JSON 清单只包含已标记结果，记录软件/算法版本、项目标识、结果 ID、规则、风险、位置和结构化证据；不复制原始文件。
 - HistoryEntry：历史库来源、指纹、特征和可选反馈标记。
 - Report：格式、筛选范围、生成版本和文件位置。
 
@@ -49,7 +50,7 @@
 - Manifest：格式版本、软件版本、创建时间和内容清单。
 - Project：项目设置和分组。
 - Index：指纹、缩略图和可移植查重特征。
-- Results：结果、证据和后续可选的轻量反馈标记。
+- Results：结果、证据和轻量反馈标记。
 - Reports：用户选择包含的报告。
 - Originals：仅完整项目包可选包含。
 - Checksums：包内关键内容校验。
@@ -65,4 +66,4 @@
 - `model_version`
 - `report_schema_version`
 
-若未来继承轻量反馈标记，必须同时核对源指纹、对应区域和相关算法规则。
+当前重扫仅在算法版本相同且 `finding_id` 完全一致时继承轻量反馈；输入或检测参数变化会先使旧扫描整体失效，算法版本变化也不会自动继承。未来若支持跨算法版本或历史库继承，还必须核对源指纹、对应区域和相关算法规则。

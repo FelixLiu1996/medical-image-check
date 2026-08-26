@@ -5,7 +5,7 @@
 ## 基本流程
 
 1. 阅读 `AGENTS.md`、`MEMORY.md` 和 `docs/STATUS.md`。
-2. 从最新主分支创建 `codex/<topic>` 或其他清晰命名的功能分支。
+2. 从最新主分支创建 `<agent-name>/<feature-name>` 功能分支，例如 `codex/lightweight-review-feedback`；功能名使用小写英文和连字符，一个分支只实现一个可独立 Review 的主题。
 3. 保持变更范围单一，补充测试和文档。
 4. 使用 Conventional Commits 风格提交。
 5. 在变更说明中列出验证命令、结果和已知限制。

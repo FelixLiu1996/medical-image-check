@@ -10,6 +10,7 @@ from medical_image_check.domain.models import (
     EvidenceLocation,
     Finding,
     FindingType,
+    ReviewStatus,
     RiskLevel,
     ScanResult,
 )
@@ -117,6 +118,60 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
 
 def test_application_packaging_smoke_mode_exits_without_event_loop() -> None:
     assert main(["--smoke-test"]) == 0
+
+
+def test_main_window_marks_filters_persists_and_exports_feedback(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    project_path = tmp_path / "review-project.mic-project.json"
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    image = QImage(80, 60, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    assert image.save(str(first))
+    assert image.save(str(second))
+    finding = Finding(
+        finding_id="review-me",
+        rule_id="image.local.geometric",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="图片存在局部重叠",
+        description="用于轻量反馈测试。",
+        locations=(EvidenceLocation(str(first)), EvidenceLocation(str(second))),
+        confidence=0.9,
+    )
+    result = ScanResult(2, 2, 0, (finding,), algorithm_version="review-test-1")
+
+    window = MainWindow()
+    window.create_project("轻量复核", project_path)
+    window._show_result(result)
+    window._results.selectRow(0)
+    window._show_selected_evidence(0)
+    assert window._review_confirm_button.isEnabled()
+
+    window._review_confirm_button.click()
+
+    assert window._current_result is not None
+    assert window._current_result.findings[0].review_status == ReviewStatus.CONFIRMED
+    assert window._results.item(0, 2).text() == "准确"
+    assert window._feedback_export_button.isEnabled()
+    feedback = window.export_feedback(tmp_path / "feedback.json")
+    assert feedback.exists()
+
+    false_positive_filter = window._review_filter_combo.findData("false_positive")
+    window._review_filter_combo.setCurrentIndex(false_positive_filter)
+    assert window._results.rowCount() == 0
+    confirmed_filter = window._review_filter_combo.findData("confirmed")
+    window._review_filter_combo.setCurrentIndex(confirmed_filter)
+    assert window._results.rowCount() == 1
+
+    restored = MainWindow()
+    restored.open_project(project_path)
+    assert restored._current_result is not None
+    assert restored._current_result.findings[0].review_status == ReviewStatus.CONFIRMED
+
+    window.close()
+    restored.close()
+    app.processEvents()
 
 
 def test_main_window_displays_local_geometric_evidence(tmp_path: Path) -> None:

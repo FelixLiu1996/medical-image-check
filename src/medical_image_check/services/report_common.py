@@ -24,7 +24,7 @@ TYPE_LABELS = {
 }
 REVIEW_LABELS = {
     ReviewStatus.PENDING: "待复核",
-    ReviewStatus.CONFIRMED: "确认重复",
+    ReviewStatus.CONFIRMED: "准确",
     ReviewStatus.NORMAL: "正常关联",
     ReviewStatus.FALSE_POSITIVE: "误报",
 }
