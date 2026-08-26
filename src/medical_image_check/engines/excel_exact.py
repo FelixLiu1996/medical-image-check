@@ -14,6 +14,8 @@ from medical_image_check.domain.models import (
     deterministic_finding_id,
 )
 from medical_image_check.engines.excel_advanced import find_advanced_excel_findings
+from medical_image_check.engines.excel_result_quality import improve_excel_result_quality
+from medical_image_check.engines.excel_semantics import filter_low_information_cells
 from medical_image_check.infrastructure.performance import (
     PerformanceRecorder,
     profile_stage,
@@ -79,24 +81,25 @@ class ExactExcelDuplicateDetector:
 
         if checkpoint:
             checkpoint()
+        analysis_cells = filter_low_information_cells(cells)
         with profile_stage(profiler, "spreadsheet.exact_values"):
-            findings = self._find_value_duplicates(cells)
+            findings = self._find_value_duplicates(analysis_cells)
         record_items(profiler, "spreadsheet.exact_values", len(findings))
         with profile_stage(profiler, "spreadsheet.exact_rows"):
-            row_findings = self._find_row_duplicates(cells)
+            row_findings = self._find_row_duplicates(analysis_cells)
             findings.extend(row_findings)
         record_items(profiler, "spreadsheet.exact_rows", len(row_findings))
         if checkpoint:
             checkpoint()
         with profile_stage(profiler, "spreadsheet.digit_fragments"):
-            digit_findings = self._find_digit_fragment_duplicates(cells)
+            digit_findings = self._find_digit_fragment_duplicates(analysis_cells)
             findings.extend(digit_findings)
         record_items(profiler, "spreadsheet.digit_fragments", len(digit_findings))
         if checkpoint:
             checkpoint()
         with profile_stage(profiler, "spreadsheet.advanced_rules"):
             advanced_findings = find_advanced_excel_findings(
-                cells,
+                analysis_cells,
                 self.analysis_settings,
                 checkpoint,
             )
@@ -105,8 +108,12 @@ class ExactExcelDuplicateDetector:
         if checkpoint:
             checkpoint()
         with profile_stage(profiler, "spreadsheet.result_sort"):
+            findings = improve_excel_result_quality(findings)
             findings.sort(
                 key=lambda item: (
+                    {"primary": 0, "secondary": 1, "normal": 2}.get(
+                        str(item.details.get("attention_tier", "secondary")), 1
+                    ),
                     {RiskLevel.HIGH: 0, RiskLevel.MEDIUM: 1, RiskLevel.LOW: 2}[item.risk],
                     -int(item.details.get("matched_count", item.details.get("maximum_length", 0))),
                     -item.confidence,

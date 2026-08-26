@@ -17,6 +17,7 @@
 - 版本 1–6 项目清单会在内存中迁移为版本 7；缺失的图片内容类型默认使用 `auto`，其他缺失结果、报告、片段设置、单条带开关和 Excel 高级参数使用相应默认值，旧扫描的性能画像保持为空，下一次保存写为版本 7。
 - performance schema 1 记录 CPU/GPU 运行环境、实际后端、加速器状态、墙钟/有效/暂停时间和稳定阶段 ID 的耗时、调用次数及处理项数。画像不记录源路径或结果证据；JSON 诊断另记录软件/算法版本和扫描数量统计。
 - `Finding.details` 支持递归 JSON 证据；Excel 片段/近似结果保存逐单元格完整值，序列、区域、运算和统计关系保存逐位置配对值、关系结果、拟合或汇总参数。
+- Excel `Finding.details.attention_tier` 使用 `primary/secondary/normal` 表示重点候选、次要线索和正常关系；同一列关系的等价规则使用 `relation_group_primary`、`related_rules` 关联。它们复用 schema 7 的递归证据，不改变项目格式。读取阶段的公式文本只存在于内存，不写入项目、报告证据或反馈清单。
 
 输入路径、图片内容类型、连续数字片段最短位数、Western blot 单条带开关或任一 Excel 高级参数变化会使最近扫描结果失效，防止导出与当前输入/参数不一致的旧结果。图片内容类型取 `auto/generic/western_blot/dot_blot/fluorescence/pathology` 之一。当前 `.mic-project.json` 仍是开发阶段清单格式，不等同于 PRD 中最终的可移植项目包，也尚未缓存图片特征。
 

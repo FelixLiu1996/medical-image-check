@@ -36,6 +36,7 @@ from medical_image_check.services.report_common import (
     REVIEW_LABELS,
     RISK_LABELS,
     TYPE_LABELS,
+    attention_label,
     clear_image_preview_cache,
     evidence_page,
     evidence_region,
@@ -282,13 +283,14 @@ def _overview_table(result: ScanResult, project: Project | None, styles) -> Tabl
 
 
 def _findings_table(result: ScanResult, styles) -> LongTable:
-    header = ["风险", "类别", "标题与说明", "置信度", "位置", "复核"]
+    header = ["风险", "层级", "类别", "标题与说明", "置信度", "位置", "复核"]
     rows: list[list[Paragraph]] = [[Paragraph(value, styles["Small"]) for value in header]]
     for finding in result.findings:
         locations = "<br/>".join(escape(location.display_text) for location in finding.locations)
         rows.append(
             [
                 Paragraph(RISK_LABELS[finding.risk], styles["Small"]),
+                Paragraph(attention_label(finding.details), styles["Small"]),
                 Paragraph(TYPE_LABELS[finding.finding_type], styles["Small"]),
                 Paragraph(
                     f"<b>{escape(finding.title)}</b><br/>{escape(finding.description)}",
@@ -300,11 +302,11 @@ def _findings_table(result: ScanResult, styles) -> LongTable:
             ]
         )
     if len(rows) == 1:
-        rows.append([Paragraph("无结果", styles["Small"]), *[Paragraph("", styles["Small"])] * 5])
+        rows.append([Paragraph("无结果", styles["Small"]), *[Paragraph("", styles["Small"])] * 6])
     table = LongTable(
         rows,
         repeatRows=1,
-        colWidths=[12 * mm, 19 * mm, 55 * mm, 15 * mm, 61 * mm, 16 * mm],
+        colWidths=[11 * mm, 16 * mm, 18 * mm, 47 * mm, 14 * mm, 55 * mm, 15 * mm],
     )
     table.setStyle(
         TableStyle(

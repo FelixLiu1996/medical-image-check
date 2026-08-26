@@ -19,6 +19,7 @@ from medical_image_check.services.report_common import (
     REVIEW_LABELS,
     RISK_LABELS,
     TYPE_LABELS,
+    attention_label,
 )
 
 REPORT_SCHEMA_VERSION = 1
@@ -125,6 +126,7 @@ class ExcelReportExporter:
                 "其他位置",
                 "证据详情",
                 "人工复核",
+                "候选层级",
             ]
         )
         for finding in result.findings:
@@ -143,11 +145,12 @@ class ExcelReportExporter:
                     "\n".join(locations[2:]),
                     _summary_details_json(finding.details),
                     REVIEW_LABELS[finding.review_status],
+                    attention_label(finding.details),
                 ]
             )
         worksheet.freeze_panes = "A2"
         worksheet.auto_filter.ref = worksheet.dimensions
-        _format_sheet(worksheet, (22, 8, 12, 24, 22, 48, 10, 48, 48, 48, 48, 12))
+        _format_sheet(worksheet, (22, 8, 12, 24, 22, 48, 10, 48, 48, 48, 48, 12, 14))
 
     @staticmethod
     def _write_image_evidence(workbook: Workbook, result: ScanResult) -> None:

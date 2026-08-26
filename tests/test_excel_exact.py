@@ -70,6 +70,25 @@ def test_csv_percentages_use_underlying_numeric_value(tmp_path: Path) -> None:
     assert [cell.canonical_value for cell in result.cells] == ["0.5", "0.5"]
 
 
+def test_reader_attaches_nearest_column_header_to_numeric_cells(tmp_path: Path) -> None:
+    path = tmp_path / "headers.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["原始值", "rescaled"])
+    sheet.append([10, 0.5])
+    sheet.append([20, 1.0])
+    workbook.save(path)
+
+    result = SpreadsheetReader().read(path)
+
+    assert [(cell.column_header, cell.header_row) for cell in result.cells] == [
+        ("原始值", 1),
+        ("rescaled", 1),
+        ("原始值", 1),
+        ("rescaled", 1),
+    ]
+
+
 def test_xls_reader_ignores_dates_and_reads_numbers(tmp_path: Path) -> None:
     path = tmp_path / "legacy.xls"
     workbook = xlwt.Workbook()

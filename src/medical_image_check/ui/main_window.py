@@ -61,6 +61,10 @@ from medical_image_check.domain.review import (
     update_finding_review_status,
 )
 from medical_image_check.engines.excel_exact import SUPPORTED_SPREADSHEET_EXTENSIONS
+from medical_image_check.engines.excel_result_quality import (
+    count_primary_excel_findings,
+    is_primary_excel_finding,
+)
 from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
 from medical_image_check.infrastructure.spreadsheets import read_spreadsheet_preview
@@ -482,6 +486,7 @@ class MainWindow(QMainWindow):
         self._excel_medium_run_spin.editingFinished.connect(self._excel_settings_changed)
         self._excel_high_run_spin.editingFinished.connect(self._excel_settings_changed)
         self._results.cellClicked.connect(self._show_selected_evidence)
+        self._attention_filter_combo.currentIndexChanged.connect(self._review_filter_changed)
         self._review_filter_combo.currentIndexChanged.connect(self._review_filter_changed)
         self._review_confirm_button.clicked.connect(
             lambda: self._set_selected_review_status(ReviewStatus.CONFIRMED)
@@ -721,6 +726,15 @@ class MainWindow(QMainWindow):
         self._results_group = QGroupBox("候选结果")
         results_layout = QVBoxLayout(self._results_group)
         review_toolbar = QHBoxLayout()
+        self._attention_filter_label = QLabel("候选范围：")
+        review_toolbar.addWidget(self._attention_filter_label)
+        self._attention_filter_combo = QComboBox()
+        self._attention_filter_combo.addItem("重点候选（推荐）", "primary")
+        self._attention_filter_combo.addItem("全部线索", "all")
+        self._attention_filter_combo.setToolTip(
+            "重点候选经过跨规则归并和来源配额整理；全部线索仍保留低风险及正常关系。"
+        )
+        review_toolbar.addWidget(self._attention_filter_combo)
         review_toolbar.addWidget(QLabel("复核状态："))
         self._review_filter_combo = QComboBox()
         self._review_filter_combo.addItem("全部", "all")
@@ -846,6 +860,8 @@ class MainWindow(QMainWindow):
             self._results_group.setTitle("数据候选结果")
             self._evidence_group.setTitle("数值证据预览")
             self._sources_label.setText("支持 XLSX、XLS、XLSM、CSV；文件夹会自动忽略图片。")
+        self._attention_filter_label.setVisible(not is_image)
+        self._attention_filter_combo.setVisible(not is_image)
         self._refresh_source_list()
         self._render_result(self._current_result)
         count = self._sources.count()
@@ -1382,8 +1398,16 @@ class MainWindow(QMainWindow):
                 f"，有效用时 {result.performance.active_seconds:.2f} 秒，"
                 f"后端 {result.performance.selected_backend.upper()}{gpu_text}"
             )
+        if self._scan_mode == ScanMode.DATA:
+            excel_findings = [
+                finding for finding in result.findings if finding.rule_id.startswith("excel.")
+            ]
+            primary_count = count_primary_excel_findings(excel_findings)
+            result_text = f"{primary_count} 条重点候选 / {len(excel_findings)} 条全部线索"
+        else:
+            result_text = f"{len(result.findings)} 条结果"
         self._status.setText(
-            f"扫描完成：{result.source_count} 个文件，{len(result.findings)} 条结果，"
+            f"扫描完成：{result.source_count} 个文件，{result_text}，"
             f"{len(result.issues)} 个提示{performance_text}。"
         )
         if result.issues:
@@ -1409,9 +1433,16 @@ class MainWindow(QMainWindow):
         active_findings = [
             finding for finding in result.findings if self._finding_matches_mode(finding)
         ]
+        attention_filter = str(self._attention_filter_combo.currentData())
         review_filter = str(self._review_filter_combo.currentData())
         for finding in result.findings:
             if not self._finding_matches_mode(finding):
+                continue
+            if (
+                self._scan_mode == ScanMode.DATA
+                and attention_filter == "primary"
+                and not is_primary_excel_finding(finding)
+            ):
                 continue
             if review_filter != "all" and finding.review_status.value != review_filter:
                 continue
@@ -1431,8 +1462,14 @@ class MainWindow(QMainWindow):
         marked_count = sum(
             finding.review_status != ReviewStatus.PENDING for finding in active_findings
         )
+        primary_count = (
+            count_primary_excel_findings(active_findings)
+            if self._scan_mode == ScanMode.DATA
+            else len(active_findings)
+        )
         self._review_summary_label.setText(
-            f"显示 {len(self._rendered_findings)} / {len(active_findings)}；已标记 {marked_count}"
+            f"显示 {len(self._rendered_findings)}；重点 {primary_count} / 全部 "
+            f"{len(active_findings)}；已标记 {marked_count}"
         )
 
     @Slot(int)
@@ -1726,6 +1763,11 @@ class MainWindow(QMainWindow):
             active_result is not None and active_result.performance is not None and not scan_running
         )
         self._review_filter_combo.setEnabled(self._current_result is not None and not scan_running)
+        self._attention_filter_combo.setEnabled(
+            self._current_result is not None
+            and self._scan_mode == ScanMode.DATA
+            and not scan_running
+        )
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
         self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
         self._image_analysis_mode_combo.setEnabled(self._project is not None and not scan_running)

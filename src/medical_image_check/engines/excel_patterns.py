@@ -18,6 +18,12 @@ from medical_image_check.domain.models import (
     RiskLevel,
     deterministic_finding_id,
 )
+from medical_image_check.engines.excel_semantics import (
+    describe_derived_relation,
+    is_informative_canonical_values,
+    is_informative_values,
+    series_segment_key,
+)
 from medical_image_check.infrastructure.spreadsheets import NumericCell
 
 CELL_OPERATION_RULE_ID = "excel.cell.target_operation"
@@ -84,12 +90,15 @@ def find_excel_pattern_findings(
 def _collect_series(
     cells: list[NumericCell], minimum_length: int = MINIMUM_SERIES_LENGTH
 ) -> list[_Series]:
-    grouped: dict[tuple[str, str, int], list[NumericCell]] = defaultdict(list)
+    grouped: dict[tuple[str, str, int, int | None], list[NumericCell]] = defaultdict(list)
     for cell in cells:
-        grouped[(cell.source_path, cell.sheet, cell.column)].append(cell)
+        grouped[series_segment_key(cell)].append(cell)
     return [
         _Series(key[0], key[1], key[2], tuple(sorted(items, key=lambda cell: cell.row)))
-        for key, items in sorted(grouped.items())
+        for key, items in sorted(
+            grouped.items(),
+            key=lambda item: (*item[0][:3], item[0][3] if item[0][3] is not None else -1),
+        )
         if len(items) >= minimum_length
     ]
 
@@ -266,6 +275,8 @@ def _find_exact_series_fragments(
                 continue
             first = series[first_index]
             second = series[second_index]
+            if describe_derived_relation(first.cells, second.cells) is not None:
+                continue
             left = 0
             while (
                 first_start - left > 0
@@ -303,7 +314,7 @@ def _find_exact_series_fragments(
         second = series[second_index]
         first_cells = first.cells[first_begin : first_begin + length]
         second_cells = second.cells[second_begin : second_begin + length]
-        if not _is_informative_cells(first_cells):
+        if not is_informative_canonical_values(tuple(cell.canonical_value for cell in first_cells)):
             continue
         locations = (
             _series_range_location(first, first_cells),
@@ -354,7 +365,7 @@ def _find_shuffled_series(
 ) -> list[Finding]:
     buckets: dict[tuple[int, tuple[str, ...]], list[_Series]] = defaultdict(list)
     for item in series:
-        if not _is_informative_values(item.values):
+        if not is_informative_values(item.values):
             continue
         signature = (len(item.cells), tuple(sorted(cell.canonical_value for cell in item.cells)))
         if len(buckets[signature]) < MAX_GROUPS_PER_BUCKET:
@@ -364,6 +375,8 @@ def _find_shuffled_series(
         if checkpoint and bucket_index % 32 == 0:
             checkpoint()
         for first, second in combinations(bucket, 2):
+            if describe_derived_relation(first.cells, second.cells) is not None:
+                continue
             first_values = [cell.canonical_value for cell in first.cells]
             second_values = [cell.canonical_value for cell in second.cells]
             if first_values == second_values:
@@ -427,7 +440,7 @@ def _find_near_duplicate_series(
         length = len(first.cells)
         if length < MINIMUM_NEAR_DUPLICATE_LENGTH:
             continue
-        if not _is_informative_values(first.values) or not _is_informative_values(second.values):
+        if not is_informative_values(first.values) or not is_informative_values(second.values):
             continue
         first_values = first.values
         second_values = second.values
@@ -485,7 +498,7 @@ def _find_robust_linear_series(
             checkpoint()
         if len(first.cells) < 4:
             continue
-        if not _is_informative_values(first.values) or not _is_informative_values(second.values):
+        if not is_informative_values(first.values) or not is_informative_values(second.values):
             continue
         fitted = _theil_sen(first.values, second.values, settings)
         if fitted is None:
@@ -569,7 +582,7 @@ def _find_exact_regions(
             checkpoint()
         for row, column in sorted(grid):
             region = _region_values(grid, row, column, 2, 2)
-            if region and _is_informative_canonical_values(region):
+            if region and is_informative_canonical_values(region):
                 signatures[tuple(region)].append((source, sheet, row, column))
 
     candidates: list[
@@ -603,7 +616,7 @@ def _find_exact_regions(
         )
         area = height * width
         region_values = _region_values(sheets[first[:2]], first[2], first[3], height, width)
-        if region_values is None or not _is_informative_canonical_values(region_values):
+        if region_values is None or not is_informative_canonical_values(region_values):
             continue
         findings.append(
             Finding(
@@ -809,7 +822,7 @@ def _find_statistical_similarity(
             checkpoint()
         if len(first.cells) < MINIMUM_STATISTICS_LENGTH:
             continue
-        if not _is_informative_values(first.values) or not _is_informative_values(second.values):
+        if not is_informative_values(first.values) or not is_informative_values(second.values):
             continue
         first_values = _finite_floats(first.values)
         second_values = _finite_floats(second.values)
@@ -879,7 +892,11 @@ def _candidate_series_pairs(series: list[_Series]) -> list[tuple[_Series, _Serie
     pairs: list[tuple[_Series, _Series]] = []
     for bucket in by_length.values():
         if len(bucket) <= ALL_PAIRS_SERIES_LIMIT:
-            pairs.extend(combinations(bucket, 2))
+            pairs.extend(
+                (first, second)
+                for first, second in combinations(bucket, 2)
+                if describe_derived_relation(first.cells, second.cells) is None
+            )
             continue
         fingerprints: dict[tuple[int, ...], list[_Series]] = defaultdict(list)
         for item in bucket:
@@ -887,7 +904,11 @@ def _candidate_series_pairs(series: list[_Series]) -> list[tuple[_Series, _Serie
             if fingerprint is not None and len(fingerprints[fingerprint]) < MAX_GROUPS_PER_BUCKET:
                 fingerprints[fingerprint].append(item)
         for candidates in fingerprints.values():
-            pairs.extend(combinations(candidates, 2))
+            pairs.extend(
+                (first, second)
+                for first, second in combinations(candidates, 2)
+                if describe_derived_relation(first.cells, second.cells) is None
+            )
     return pairs
 
 
@@ -931,18 +952,6 @@ def _finding_distinct_value_count(finding: Finding) -> int:
             if value is not None:
                 values.add(str(value))
     return len(values)
-
-
-def _is_informative_cells(cells: tuple[NumericCell, ...]) -> bool:
-    return _is_informative_canonical_values([cell.canonical_value for cell in cells])
-
-
-def _is_informative_values(values: tuple[Decimal, ...]) -> bool:
-    return len(values) >= 2 and len(set(values)) >= 2 and any(value != 0 for value in values)
-
-
-def _is_informative_canonical_values(values: list[str] | tuple[str, ...]) -> bool:
-    return len(values) >= 2 and len(set(values)) >= 2 and any(value != "0" for value in values)
 
 
 def _coarse_fingerprint(values: tuple[Decimal, ...]) -> tuple[int, ...] | None:

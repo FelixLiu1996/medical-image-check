@@ -4,14 +4,15 @@
 
 ## 当前目标
 
-在不改变查重算法的前提下建立 GPU 性能画像：记录图片、专项算法和 Excel 各阶段耗时，探测 NVIDIA/OpenCV CUDA 环境，并导出不含原始数据、路径或查重证据的性能诊断。当前开发分支为 `codex/gpu-performance-profiling`；本阶段不启用 GPU 计算。
+先完成 Excel 工程质量优化，再进入 Dot blot 算法调优。当前开发分支为 `codex/excel-result-quality`：识别公式/表头支持的正常派生列关系，统一低信息量门槛，并以不删除全部线索的方式提供最多 50 条默认重点候选。Dot blot 误报和局部子集匹配将在本分支稳定并合入后使用独立算法分支处理。
 
 ## 当前状态
 
 - 用户已确认 `docs/PRD.md` 0.1 并授权开始初版开发。
 - 已建立跨窗口开发治理文档。
 - 本地 Git 已绑定远程仓库 `origin`：`https://github.com/FelixLiu1996/medical-image-check.git`。
-- 轻量反馈功能提交已快进合并并推送到 `main`（`2d9ea57`），开发分支和 main 必需 CI 均通过；当前开发分支为 `codex/gpu-performance-profiling`。
+- 轻量反馈功能提交已快进合并并推送到 `main`（`2d9ea57`），开发分支和 main 必需 CI 均通过。
+- GPU 性能画像已合入 `main`（`37bc7ca`），标签 `v0.1.0-alpha.12` 已创建；当前仍固定使用 CPU 后端。
 - ADR-0002 已选择 Python 3.12、PySide6 Essentials 和模块化单体。
 - 已实现项目 UI 生命周期、扫描结果持久化、三种本地报告、图片文件/解码像素重复、整体感知近似、局部几何重叠、Western/荧光/病理专项，以及 Excel 精确/片段/近似/运算/结构/稳健线性/统计规则和 CI。
 - 项目清单已升级为 schema 7，并兼容读取 schema 1–6；除既有设置和结果外，可选保存 performance schema 1 性能画像，旧项目加载后性能画像为空。
@@ -38,7 +39,10 @@
 - 已实现低侵入的扫描阶段计时和暂停时间扣除，覆盖输入收集、图片解码、通用/Western/Dot blot/荧光/病理特征与验证、Excel 读取和各规则阶段。
 - 已实现只读运行环境探测：固定参数且不经过 shell 调用 `nvidia-smi`，并查询 OpenCV CUDA 设备数；探测失败不影响扫描，当前选择后端始终为 CPU。
 - GUI 已增加“导出性能诊断”，JSON 包含软件/算法版本、机器/GPU 信息和阶段耗时，不包含原始文件、输入路径、查重位置或结构化证据。
-- 本地开发版本为 `0.1.0a12`，扫描算法版本保持 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-3`。
+- Excel 数值单元格读取已增加最近同列表头、表头行和只读公式引用元数据；序列按表格区块分段，明确编号段不进入数值规则。
+- 同排公式或明确 `rescaled`/归一化表头支持的固定换算已分类为正常派生关系；全部规则仍保留，但数据界面默认展示跨规则归并、按来源配额且最多 50 条的重点候选，可切换全部线索。
+- ADR-0006 已记录“完整线索 + 有界重点候选”策略；三种报告记录候选层级，HTML 支持层级筛选。
+- 本地开发版本为 `0.1.0a13`，扫描算法版本为 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-4`。
 
 ## 已确认的重要方向
 
@@ -67,14 +71,15 @@
 - Windows portable 已通过 GitHub Windows runner 构建与打包冒烟；干净 Windows 10/11 实机人工操作仍待验证。
 - 局部图像裁剪/重叠和 Western/荧光/病理三个专项基线已实现；通用单图 Copy-Move、可调整多面板拆分、荧光实验组语义和病理连续切片语义尚未实现。
 - Western blot 当前只形成明显横向条带行候选，复杂排版、弱条带、文字标签、任意擦除/拼接仍待验收数据和后续算法覆盖。
-- Excel 已确认规则的全局扫描 Alpha 基线已实现；自动识别实验组和手动框选区域尚未实现。新增结构/运算/统计规则每类最多保留 300 条，统计相似始终只标低风险。
+- Excel 已确认规则的全局扫描 Alpha 基线已实现；自动识别实验组和手动框选区域尚未实现。重点队列是工程排序而非准确率结论；全部线索中统计相似始终只标低风险。
+- Dot blot 当前仍会把部分斑点条带与无关纹理图错误配对，也未可靠支持一侧 3 个斑点与另一侧 8 个斑点的局部子集匹配；需要在工程分支稳定后结合更多有标注原图调优。
 
 ## 下一步
 
-1. 完成并推送 `codex/gpu-performance-profiling`，确认 Windows/Linux CI 和 Windows portable。
-2. 在 RTX 3080 Ti 参考机上分别扫描有代表性的图片和 Excel 输入并导出 JSON 性能诊断；同时保留 CPU 基线、驱动信息和软件版本。
-3. 根据画像确定首批值得迁移的阶段，再以新 ADR 选择 CUDA 后端、依赖分发和 CPU/GPU 一致性策略；不能在画像前承诺加速比例。
-4. 使用授权 Western/Dot blot/荧光/病理及 Excel 独立正负例校准算法；GPU 实现不得改变候选语义和阈值。
+1. 完成 `codex/excel-result-quality` 的完整测试、Windows/Linux CI 和 Windows portable，确认后合入 `main`。
+2. 从更新后的 `main` 建立独立 Dot blot 算法分支，先收紧条带/网格/划痕纹理误报，再实现带几何一致性约束的局部斑点子集匹配。
+3. 使用现有本地样例和后续授权/公开可用的正负例记录逐对期望，不依赖 PubPeer 自动抓取；PubPeer 仅作为人工线索来源，原始论文附件的获取和许可单独核查。
+4. RTX 3080 Ti 性能诊断仍待参考机回传；后续 GPU 后端选择不与本轮 Excel/Dot blot 准确性优化混在同一分支。
 
 ## 验证状态
 
@@ -83,7 +88,7 @@
 - `ruff check`：通过。
 - `ruff format --check`：通过。
 - `pip check`：通过。
-- `pytest`：110 项通过；新增计时累积/暂停扣除、NVIDIA/OpenCV CUDA 探测失败隔离、项目迁移、诊断隐私和 GUI 导出测试。
+- `pytest`：114 项通过；新增表头元数据、公式派生列正常关系、有界重点队列和 GUI 重点/全部切换测试。
 - Qt offscreen 启动冒烟：通过。
 - 项目保存/恢复与 Excel 报告：通过合成集成测试。
 - 解码像素、多页 TIFF、旋转及 JPEG 压缩候选：通过合成测试。
@@ -93,7 +98,9 @@
 - `0.1.0a12` 在 macOS ARM64 完成真实小图片扫描画像：正确识别 Darwin/ARM64、CPU 后端和无 NVIDIA 环境，并生成阶段耗时；未使用或写入真实实验数据。
 - `0.1.0a12` Qt offscreen 1024×720 与 1280×900 布局检查通过；wheel 构建、打包程序三报告冒烟、许可证收集、源码编译和 `pyside6-deploy --dry-run` 本地通过。
 - 4 张真实同源 Dot blot 本地只读回归输出全部 6 组两两关系，未出现 Western blot/病理串类，约 0.53 秒；样例未入库。
-- 13 个真实 Excel 工作簿本地只读回归由修复前 9,864 条降至 1,802 条，零乘积为 0 且已知阳性保留，约 6.31 秒；样例未入库。
+- 13 个真实 Excel 工作簿本地只读回归：`excel-advanced-4` 保留 1,775 条全部线索，识别 22 条正常派生关系，默认重点队列 50 条；MOESM9 数字片段、MOESM14 配对和为 2、MOESM15 结构重复仍在重点队列，约 6.36 秒；样例未入库。
+- `0.1.0a13` PDF 新增候选层级列后完成两页 A4 Poppler 全页渲染目视检查，表头、分页和多行位置无裁切或重叠。
+- `0.1.0a13` Qt offscreen 打包程序三报告冒烟、源码编译、wheel 构建和 `pyside6-deploy --dry-run` 通过。
 - 双入口 GUI 源码 CI Windows/Linux run `32862204165` 通过；Windows portable run `32862205003` 完成 standalone、打包程序三报告冒烟、许可证收集、ZIP 组装和上传，总耗时 24 分 39 秒，工件 92.3 MB，artifact digest `9507b3b0998fb51cde1e48bdd1da1a880735ffd38a1dbe1583a47652edd7fd23`。
 - Python wheel 构建与源码编译检查：通过。
 - GitHub CI：Windows 完整测试与 Linux 核心测试通过（run `32834918247`）。

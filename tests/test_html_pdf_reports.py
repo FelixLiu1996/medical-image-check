@@ -79,6 +79,7 @@ def test_html_report_is_single_file_with_search_and_embedded_evidence(tmp_path: 
     assert "荧光单通道与 Merge 成分对应" in content
     assert "data:image/png;base64," in content
     assert 'id="search"' in content
+    assert 'id="attention"' in content
     assert "filterRows" in content
     assert "图片内容类型 自动识别（推荐）" in content
     assert "Excel 相对容差 0.0%" in content

@@ -18,6 +18,12 @@ from medical_image_check.domain.models import (
     deterministic_finding_id,
 )
 from medical_image_check.engines.excel_patterns import find_excel_pattern_findings
+from medical_image_check.engines.excel_semantics import (
+    DerivedColumnRelation,
+    describe_derived_relation,
+    is_informative_values,
+    series_segment_key,
+)
 from medical_image_check.infrastructure.spreadsheets import NumericCell
 
 APPROXIMATE_RULE_ID = "excel.value.approximate"
@@ -28,6 +34,7 @@ SERIES_SUM_RULE_ID = "excel.series.target_sum"
 SERIES_PRODUCT_RULE_ID = "excel.series.target_product"
 SERIES_DIFFERENCE_RULE_ID = "excel.series.target_difference"
 SERIES_QUOTIENT_RULE_ID = "excel.series.target_quotient"
+SERIES_DERIVED_RULE_ID = "excel.series.normal_derived"
 
 APPROXIMATE_BANDS = (
     (Decimal("0.0001"), "0.01%"),
@@ -239,9 +246,9 @@ def _find_series_relations(
 def _collect_series(
     cells: list[NumericCell], minimum_length: int = MINIMUM_SERIES_LENGTH
 ) -> list[_NumericSeries]:
-    grouped: dict[tuple[str, str, int], list[NumericCell]] = defaultdict(list)
+    grouped: dict[tuple[str, str, int, int | None], list[NumericCell]] = defaultdict(list)
     for cell in cells:
-        grouped[(cell.source_path, cell.sheet, cell.column)].append(cell)
+        grouped[series_segment_key(cell)].append(cell)
     return [
         _NumericSeries(
             source_path=key[0],
@@ -249,7 +256,10 @@ def _collect_series(
             column=key[2],
             cells=tuple(sorted(grouped_cells, key=lambda cell: cell.row)),
         )
-        for key, grouped_cells in sorted(grouped.items())
+        for key, grouped_cells in sorted(
+            grouped.items(),
+            key=lambda item: (*item[0][:3], item[0][3] if item[0][3] is not None else -1),
+        )
         if len(grouped_cells) >= minimum_length
     ]
 
@@ -314,7 +324,7 @@ def _compare_series(
     second_values = second.values
     if len(first_values) != len(second_values):
         return []
-    if not _is_informative_series(first_values) or not _is_informative_series(second_values):
+    if not is_informative_values(first_values) or not is_informative_values(second_values):
         return []
 
     relations: list[tuple[str, str, str, Decimal, tuple[Decimal, ...]]] = []
@@ -421,18 +431,17 @@ def _compare_series(
                 )
             )
 
+    derived_relation = describe_derived_relation(first.cells, second.cells)
+    if derived_relation is not None and relations:
+        return [
+            _derived_series_finding(
+                first,
+                second,
+                derived_relation,
+                relations,
+            )
+        ]
     return [_series_finding(first, second, *relation, settings) for relation in relations]
-
-
-def _is_informative_series(values: tuple[Decimal, ...]) -> bool:
-    """Reject constant and all-zero/identity sequences before relation mining.
-
-    A varied sequence may legitimately contain zero or one, so those values are
-    not removed individually. The gate only rejects columns that cannot carry a
-    meaningful positional pattern.
-    """
-
-    return len(values) >= 2 and len(set(values)) >= 2 and any(value != 0 for value in values)
 
 
 def _constant_scale(
@@ -512,6 +521,58 @@ def _series_finding(
             "parameter": str(parameter),
             "matched_count": matched_count,
             "alignment": "按每列数值单元格出现顺序",
+            "first_series": _series_evidence(first),
+            "second_series": _series_evidence(second),
+            "paired_values": paired_values,
+        },
+    )
+
+
+def _derived_series_finding(
+    first: _NumericSeries,
+    second: _NumericSeries,
+    derived_relation: DerivedColumnRelation,
+    relations: list[tuple[str, str, str, Decimal, tuple[Decimal, ...]]],
+) -> Finding:
+    locations = (first.location, second.location)
+    primary_rule, _, _, parameter, results = relations[0]
+    matched_count = len(first.cells)
+    derived_label = "第二列" if derived_relation.derived_side == "second" else "第一列"
+    paired_values = [
+        {
+            "position": index,
+            "first_coordinate": first_cell.coordinate,
+            "first_value": first_cell.canonical_value,
+            "second_coordinate": second_cell.coordinate,
+            "second_value": second_cell.canonical_value,
+            "relation_result": str(result),
+        }
+        for index, (first_cell, second_cell, result) in enumerate(
+            zip(first.cells, second.cells, results, strict=True), start=1
+        )
+    ]
+    return Finding(
+        finding_id=deterministic_finding_id(SERIES_DERIVED_RULE_ID, locations),
+        rule_id=SERIES_DERIVED_RULE_ID,
+        finding_type=FindingType.NORMAL_RELATION,
+        risk=RiskLevel.LOW,
+        title="原始列与派生列的正常换算关系",
+        description=(
+            f"{derived_label}由另一列按同排规则换算得到；已识别为正常派生关系，不作为重点异常候选。"
+        ),
+        locations=locations,
+        confidence=0.98 if "公式" in derived_relation.reason else 0.9,
+        details={
+            "relationship_class": "normal_derived_column",
+            "derived_side": derived_relation.derived_side,
+            "semantic_reason": derived_relation.reason,
+            "first_header": derived_relation.first_header or "",
+            "second_header": derived_relation.second_header or "",
+            "parameter": str(parameter),
+            "matched_count": matched_count,
+            "alignment": "按同一表格区块中的同行单元格对齐",
+            "detected_rule_ids": [relation[0] for relation in relations],
+            "primary_detected_rule_id": primary_rule,
             "first_series": _series_evidence(first),
             "second_series": _series_evidence(second),
             "paired_values": paired_values,

@@ -34,6 +34,7 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
             "value": "2.5",
             "count": 2,
             "cells": [{"coordinate": "B2", "canonical_value": "2.5"}],
+            "attention_tier": "primary",
         },
     )
     result = ScanResult(
@@ -62,6 +63,7 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
     assert findings["B2"].value == "低"
     assert "实验A" in findings["H2"].value
     assert "实验B" in findings["I2"].value
+    assert findings["M2"].value == "重点候选"
     evidence = json.loads(findings["K2"].value)
     assert "详见“数值证据”" in evidence["cells"]
     numeric_evidence = workbook["数值证据"]

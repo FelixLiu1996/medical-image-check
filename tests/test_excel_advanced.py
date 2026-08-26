@@ -4,7 +4,18 @@ import pytest
 from openpyxl import Workbook
 
 from medical_image_check.domain.excel_settings import ExcelAnalysisSettings
+from medical_image_check.domain.models import (
+    EvidenceLocation,
+    Finding,
+    FindingType,
+    RiskLevel,
+)
 from medical_image_check.engines.excel_exact import ExactExcelDuplicateDetector
+from medical_image_check.engines.excel_result_quality import improve_excel_result_quality
+from medical_image_check.infrastructure.spreadsheets import (
+    NumericCell,
+    SpreadsheetReadResult,
+)
 
 
 def _save_columns(path: Path, first: list[float], second: list[float] | None = None) -> None:
@@ -298,3 +309,80 @@ def test_batch_selection_keeps_late_sheet_exact_fragment(tmp_path: Path) -> None
         and {location.coordinate for location in item.locations} == {"D4:D7", "G4:G7"}
         for item in findings
     )
+
+
+def test_formula_derived_rescaled_column_is_a_normal_relation(tmp_path: Path) -> None:
+    path = tmp_path / "derived.xlsx"
+    cells = []
+    for row, (raw, rescaled) in enumerate(((10, 1), (20, 2), (30, 3), (40, 4)), start=2):
+        cells.extend(
+            (
+                NumericCell(
+                    str(path),
+                    "结果",
+                    row,
+                    1,
+                    f"A{row}",
+                    str(raw),
+                    str(raw),
+                    column_header="原始值",
+                    header_row=1,
+                ),
+                NumericCell(
+                    str(path),
+                    "结果",
+                    row,
+                    2,
+                    f"B{row}",
+                    str(rescaled),
+                    str(rescaled),
+                    column_header="rescaled",
+                    header_row=1,
+                    formula=f"=A{row}/10",
+                ),
+            )
+        )
+
+    class StaticReader:
+        def read(self, source: Path) -> SpreadsheetReadResult:
+            assert source == path
+            return SpreadsheetReadResult(tuple(cells))
+
+    findings, issues = ExactExcelDuplicateDetector(reader=StaticReader()).scan([path])
+
+    assert issues == []
+    derived = [item for item in findings if item.rule_id == "excel.series.normal_derived"]
+    assert len(derived) == 1
+    assert derived[0].finding_type == "normal_relation"
+    assert derived[0].details["relationship_class"] == "normal_derived_column"
+    assert derived[0].details["attention_tier"] == "normal"
+    assert "formula" not in derived[0].details
+    assert all(f"=A{row}/10" not in str(derived[0].details).replace(" ", "") for row in range(2, 6))
+    assert not any(
+        item.rule_id in {"excel.series.scale", "excel.series.target_quotient"} for item in findings
+    )
+
+
+def test_attention_queue_is_bounded_without_deleting_secondary_clues() -> None:
+    findings = [
+        Finding(
+            finding_id=f"finding-{index}",
+            rule_id="excel.row.exact",
+            finding_type=FindingType.EXACT_DUPLICATE,
+            risk=RiskLevel.HIGH,
+            title="数值行完全重复",
+            description="合成候选",
+            locations=(
+                EvidenceLocation(f"book-{index}.xlsx", "Sheet1", "第 1 行"),
+                EvidenceLocation(f"book-{index}.xlsx", "Sheet2", "第 2 行"),
+            ),
+            details={"matched_count": 8},
+        )
+        for index in range(70)
+    ]
+
+    improved = improve_excel_result_quality(findings)
+
+    assert len(improved) == 70
+    assert sum(item.details["attention_tier"] == "primary" for item in improved) == 16
+    assert sum(item.details["attention_tier"] == "secondary" for item in improved) == 54

@@ -26,6 +26,9 @@ class NumericCell:
     canonical_value: str
     display_value: str
     hidden_sheet: bool = False
+    column_header: str | None = None
+    header_row: int | None = None
+    formula: str | None = None
 
     @property
     def location(self) -> EvidenceLocation:
@@ -290,6 +293,7 @@ class SpreadsheetReader:
                 values_sheet = values_book[formulas_sheet.title]
                 hidden = formulas_sheet.sheet_state != "visible"
                 missing_formula_results = 0
+                headers: dict[int, tuple[str, int]] = {}
                 for formula_row, value_row in zip_longest(
                     formulas_sheet.iter_rows(), values_sheet.iter_rows(), fillvalue=()
                 ):
@@ -301,6 +305,11 @@ class SpreadsheetReader:
                         if formula_cell.data_type == "f" and value_cell.value is None:
                             missing_formula_results += 1
                             continue
+                        if formula_cell.data_type != "f" and isinstance(value_cell.value, str):
+                            header = _header_text(value_cell.value)
+                            if header:
+                                headers[value_cell.column] = (header, value_cell.row)
+                            continue
                         normalized = _numeric_value(
                             value_cell.value,
                             is_date=bool(value_cell.is_date or formula_cell.is_date),
@@ -308,6 +317,7 @@ class SpreadsheetReader:
                         if normalized is None:
                             continue
                         canonical, display = normalized
+                        header = headers.get(value_cell.column)
                         cells.append(
                             NumericCell(
                                 source_path=str(path),
@@ -318,6 +328,13 @@ class SpreadsheetReader:
                                 canonical_value=canonical,
                                 display_value=display,
                                 hidden_sheet=hidden,
+                                column_header=header[0] if header else None,
+                                header_row=header[1] if header else None,
+                                formula=(
+                                    str(formula_cell.value)
+                                    if formula_cell.data_type == "f"
+                                    else None
+                                ),
                             )
                         )
                 if missing_formula_results:
@@ -339,15 +356,22 @@ class SpreadsheetReader:
         try:
             for sheet in book.sheets():
                 hidden = bool(getattr(sheet, "visibility", 0))
+                headers: dict[int, tuple[str, int]] = {}
                 for row_index in range(sheet.nrows):
                     for column_index in range(sheet.ncols):
                         cell = sheet.cell(row_index, column_index)
+                        if cell.ctype == xlrd.XL_CELL_TEXT:
+                            header = _header_text(cell.value)
+                            if header:
+                                headers[column_index + 1] = (header, row_index + 1)
+                            continue
                         if cell.ctype != xlrd.XL_CELL_NUMBER:
                             continue
                         normalized = _numeric_value(cell.value)
                         if normalized is None:
                             continue
                         canonical, display = normalized
+                        header = headers.get(column_index + 1)
                         cells.append(
                             NumericCell(
                                 source_path=str(path),
@@ -358,6 +382,8 @@ class SpreadsheetReader:
                                 canonical_value=canonical,
                                 display_value=display,
                                 hidden_sheet=hidden,
+                                column_header=header[0] if header else None,
+                                header_row=header[1] if header else None,
                             )
                         )
         finally:
@@ -382,12 +408,17 @@ class SpreadsheetReader:
             dialect = csv.excel
 
         cells: list[NumericCell] = []
+        headers: dict[int, tuple[str, int]] = {}
         for row_index, row in enumerate(csv.reader(text.splitlines(), dialect), start=1):
             for column_index, raw_value in enumerate(row, start=1):
                 normalized = self._parse_csv_number(raw_value)
                 if normalized is None:
+                    header = _header_text(raw_value)
+                    if header:
+                        headers[column_index] = (header, row_index)
                     continue
                 canonical, display = normalized
+                header = headers.get(column_index)
                 cells.append(
                     NumericCell(
                         source_path=str(path),
@@ -397,6 +428,8 @@ class SpreadsheetReader:
                         coordinate=f"{get_column_letter(column_index)}{row_index}",
                         canonical_value=canonical,
                         display_value=display,
+                        column_header=header[0] if header else None,
+                        header_row=header[1] if header else None,
                     )
                 )
         return SpreadsheetReadResult(tuple(cells))
@@ -419,3 +452,10 @@ class SpreadsheetReader:
             return canonical_numeric(value), stripped
         except ValueError:
             return None
+
+
+def _header_text(value: object) -> str | None:
+    text = str(value).strip()
+    if not text:
+        return None
+    return " ".join(text.split())[:160]

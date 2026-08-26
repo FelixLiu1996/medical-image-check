@@ -16,6 +16,7 @@ from medical_image_check.services.report_common import (
     REVIEW_LABELS,
     RISK_LABELS,
     TYPE_LABELS,
+    attention_label,
     clear_image_preview_cache,
     evidence_page,
     evidence_region,
@@ -87,16 +88,16 @@ details{{margin-top:8px}} pre{{white-space:pre-wrap;word-break:break-word;backgr
 <div class="card"><span>输入文件</span><b>{source_count}</b></div><div class="card"><span>图片 / 表格</span><b>{result.image_count} / {result.spreadsheet_count}</b></div>
 <div class="card"><span>结果总数</span><b>{len(result.findings)}</b></div><div class="card"><span>高 / 中 / 低</span><b>{_risk_count(result, RiskLevel.HIGH)} / {_risk_count(result, RiskLevel.MEDIUM)} / {_risk_count(result, RiskLevel.LOW)}</b></div>
 </section>
-<h2>查重结果</h2><div class="toolbar"><input id="search" type="search" placeholder="搜索标题、说明、位置"><select id="risk"><option value="">全部风险</option><option value="high">高风险</option><option value="medium">中风险</option><option value="low">低风险</option></select></div>
-<div class="table-wrap"><table id="findings"><thead><tr><th>风险</th><th>类别</th><th>标题与说明</th><th>置信度</th><th>位置</th><th>复核</th></tr></thead><tbody>{finding_rows}</tbody></table></div>
+<h2>查重结果</h2><div class="toolbar"><input id="search" type="search" placeholder="搜索标题、说明、位置"><select id="risk"><option value="">全部风险</option><option value="high">高风险</option><option value="medium">中风险</option><option value="low">低风险</option></select><select id="attention"><option value="">全部层级</option><option value="primary">重点候选</option><option value="secondary">次要线索</option><option value="normal">正常关系</option></select></div>
+<div class="table-wrap"><table id="findings"><thead><tr><th>风险</th><th>候选层级</th><th>类别</th><th>标题与说明</th><th>置信度</th><th>位置</th><th>复核</th></tr></thead><tbody>{finding_rows}</tbody></table></div>
 <h2>图像证据</h2><div class="evidence-grid">{evidence_cards or '<div class="card">当前结果没有可嵌入的双图像证据。</div>'}</div>
 <h2>扫描提示</h2><div class="table-wrap"><table><thead><tr><th>级别</th><th>来源</th><th>说明</th></tr></thead><tbody>{issue_rows}</tbody></table></div>
 <footer>输入路径仅作为定位证据记录；报告为完全本地生成的单文件，不加载网络资源。</footer>
 </main>
 <script>
-const search=document.querySelector('#search'),risk=document.querySelector('#risk'),rows=[...document.querySelectorAll('#findings tbody tr')];
-function filterRows(){{const q=search.value.trim().toLowerCase(),r=risk.value;for(const row of rows){{row.hidden=!!((r&&row.dataset.risk!==r)||(q&&!row.innerText.toLowerCase().includes(q)))}}}}
-search.addEventListener('input',filterRows);risk.addEventListener('change',filterRows);
+const search=document.querySelector('#search'),risk=document.querySelector('#risk'),attention=document.querySelector('#attention'),rows=[...document.querySelectorAll('#findings tbody tr')];
+function filterRows(){{const q=search.value.trim().toLowerCase(),r=risk.value,a=attention.value;for(const row of rows){{row.hidden=!!((r&&row.dataset.risk!==r)||(a&&row.dataset.attention!==a)||(q&&!row.innerText.toLowerCase().includes(q)))}}}}
+search.addEventListener('input',filterRows);risk.addEventListener('change',filterRows);attention.addEventListener('change',filterRows);
 </script></body></html>"""
 
 
@@ -117,8 +118,10 @@ def _project_parameter_text(project: Project | None) -> str:
 def _finding_row(finding) -> str:
     locations = "<br>".join(escape(location.display_text) for location in finding.locations)
     risk = finding.risk.value
+    attention = str(finding.details.get("attention_tier", ""))
     return (
-        f'<tr data-risk="{risk}"><td class="risk-{risk}">{RISK_LABELS[finding.risk]}</td>'
+        f'<tr data-risk="{risk}" data-attention="{escape(attention)}"><td class="risk-{risk}">{RISK_LABELS[finding.risk]}</td>'
+        f"<td>{attention_label(finding.details)}</td>"
         f"<td>{TYPE_LABELS[finding.finding_type]}</td>"
         f"<td><strong>{escape(finding.title)}</strong><br>{escape(finding.description)}"
         f"<details><summary>结构化证据</summary><pre>{escape(json.dumps(finding.details, ensure_ascii=False, indent=2))}</pre></details></td>"

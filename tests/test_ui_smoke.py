@@ -335,6 +335,48 @@ def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> N
     app.processEvents()
 
 
+def test_data_workspace_defaults_to_primary_attention_queue() -> None:
+    app = QApplication.instance() or QApplication([])
+    locations = (
+        EvidenceLocation("first.xlsx", "Sheet1", "A1:A4"),
+        EvidenceLocation("second.xlsx", "Sheet1", "B1:B4"),
+    )
+    primary = Finding(
+        finding_id="primary-excel",
+        rule_id="excel.series.exact",
+        finding_type=FindingType.EXACT_DUPLICATE,
+        risk=RiskLevel.HIGH,
+        title="重点候选",
+        description="默认显示",
+        locations=locations,
+        details={"attention_tier": "primary", "matched_count": 4},
+    )
+    secondary = Finding(
+        finding_id="secondary-excel",
+        rule_id="excel.value.exact",
+        finding_type=FindingType.EXACT_DUPLICATE,
+        risk=RiskLevel.LOW,
+        title="次要线索",
+        description="仅在全部线索中显示",
+        locations=locations,
+        details={"attention_tier": "secondary"},
+    )
+    result = ScanResult(2, 0, 2, (primary, secondary))
+
+    window = MainWindow()
+    window._set_scan_mode(ScanMode.DATA)
+    window._current_result = result
+    window._render_result(result)
+
+    assert window._results.rowCount() == 1
+    assert "重点 1 / 全部 2" in window._review_summary_label.text()
+    window._attention_filter_combo.setCurrentIndex(window._attention_filter_combo.findData("all"))
+    assert window._results.rowCount() == 2
+
+    window.close()
+    app.processEvents()
+
+
 def test_main_window_displays_western_blot_evidence(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     first = tmp_path / "first.png"

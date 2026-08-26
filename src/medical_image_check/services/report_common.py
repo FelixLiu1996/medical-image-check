@@ -40,6 +40,12 @@ RELATIONSHIP_LABELS = {
     "suspected_same_channel_reuse": "同通道疑似复用",
     "normal_different_magnification": "不同倍率正常关系",
     "suspected_pathology_reuse": "组织区域疑似复用",
+    "normal_derived_column": "原始列与派生列正常关系",
+}
+ATTENTION_LABELS = {
+    "primary": "重点候选",
+    "secondary": "次要线索",
+    "normal": "正常关系",
 }
 CHANNEL_LABELS = {
     "blue": "蓝色通道",
@@ -51,6 +57,10 @@ CHANNEL_LABELS = {
     "unknown": "未识别",
 }
 REPORT_DISCLAIMER = "本报告仅提供科研数据复核候选证据，不自动判定学术不端。"
+
+
+def attention_label(details: dict) -> str:
+    return ATTENTION_LABELS.get(str(details.get("attention_tier", "")), "-")
 
 
 def evidence_region(details: dict, prefix: str) -> tuple[int, int, int, int] | None:
