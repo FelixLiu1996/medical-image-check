@@ -1,6 +1,6 @@
 # 项目状态
 
-最后更新：2026-08-26
+最后更新：2026-08-27
 
 ## 已完成
 
@@ -89,15 +89,18 @@
 - Excel 已确认数值规则的全局扫描 Alpha 基线已补齐；自动识别实验组与手动框选尚未进入当前 GUI。
 - 首轮反馈的两组问题已完成本地修复：13 个真实工作簿候选由 9,864 条降至 1,802 条且已知阳性保留；4 张同源 Dot blot 自动模式识别全部 6 组两两关系，未再输出 Western blot/病理串类结果。真实样例未进入仓库，样本量不足以作为准确率承诺。
 - 轻量反馈已合入并推送 `main`（`2d9ea57`），开发分支和 main CI 均通过。
-- 当前开发版本为 `0.1.0a13`，扫描算法为 `generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
+- Dot blot 已升级为局部背景弱斑点候选、任意方向阵列、3–8 个近连续局部子集和逐斑点局部图像联合验证；同一页对只保留最佳结果，相同排列但局部内容不相容的合成负例已被拒绝。
+- 增加本地 Dot blot 逐对标签清单评测器，输出 TP/FP/FN/TN 等指标并校验同一来源组不跨数据集；不下载、复制或提交真实图片。
+- 当前开发版本为 `0.1.0a14`，扫描算法为 `generic-image-local-1+western-blot-1+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
 - Excel 工程优化本地回归已完成：正常 `rescaled` 公式列不再进入重点异常队列，默认重点候选由约 1,800 条全部线索收敛为 50 条，且三类已知阳性仍在重点队列。该结果是工作量控制，不代表 50 条均为真实异常。
 - 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
 
 ## 下一步
 
-1. 推送 `codex/excel-result-quality`，确认 Windows/Linux CI 与 Windows portable 后合入 `main`。
-2. 建立独立 Dot blot 算法分支，处理专项误报和局部斑点子集匹配；用现有样例形成逐对正负标签，并继续收集授权数据。
-3. 在 RTX 3080 Ti 参考机上运行图片和 Excel 代表性任务，导出性能诊断并与 CPU 基线对照；GPU 后端仍单独决策。
+1. 完成 `codex/dot-blot-algorithm-tuning` 的全量测试、Windows/Linux CI 和 Windows portable；通过并经用户确认后再合入 `main`。
+2. 按 `docs/DOT_BLOT_EVALUATION.md` 继续收集授权/可合法本地使用的正负例并逐对标注；PubPeer 只作人工线索，不自动抓取。
+3. 基于隔离的 train/validation 标签校准二维点阵、稀疏非连续子集和复杂污渍输入；在真实 test 标签足够前不宣称准确率。
+4. 在 RTX 3080 Ti 参考机上运行代表性任务并导出性能诊断；GPU 后端仍单独决策。
 
 ## 阻塞或待定
 
@@ -130,7 +133,7 @@
 - Python 3.12.13
 - Ruff 检查与格式检查通过
 - `pip check` 通过
-- pytest 114 项通过；新增表头元数据、公式派生列正常关系、有界重点队列和 GUI 重点/全部切换测试
+- pytest 119 项通过；新增 Dot blot 弱斑点、3/8 局部子集、常见等间距排列/不相容内容负例和本地评测清单测试，并保留既有 Excel/GUI 回归。
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过
@@ -138,7 +141,8 @@
 - `0.1.0a11` 轻量反馈结果区已通过 Qt offscreen 截图检查；开发分支 CI run `32926326818`、Windows portable run `32925292521` 及合入 main 后 CI run `32926991817` 均通过。
 - `0.1.0a12` macOS ARM64 真实小图片扫描画像正确识别 CPU/无 NVIDIA 环境并输出阶段耗时；扫描规则和算法版本未改变。
 - `0.1.0a12` Qt offscreen 1024×720 与 1280×900 布局检查、wheel 构建、打包程序三报告冒烟、许可证收集、源码编译和 `pyside6-deploy --dry-run` 均通过。
-- 4 张真实同源 Dot blot 本地只读回归：6 组两两关系全部输出，0 条 Western blot/病理串类，约 0.53 秒。
+- 4 张真实同源 Dot blot 本地只读回归：`dot-blot-2` 自动模式下 6 组两两关系全部输出且没有其他专项串类，无读取问题，约 1.8 秒；样例未入库。
+- Dot blot 等间距负例合成微基准：25 张独立四斑点图片提取 28 个阵列候选约 1.6 秒、验证约 2.3 秒，输出 0 条专项结果。
 - 13 个真实 Excel 工作簿本地只读回归：1,775 条全部线索、22 条正常派生关系、50 条重点候选；已知连续片段/配对和/结构重复阳性均在重点队列，约 6.36 秒；修复前为 9,864 条。
 - `0.1.0a13` PDF 候选层级列通过两页 A4 Poppler 全页渲染目视检查，无裁切、重叠或分页异常。
 - `0.1.0a13` Qt offscreen 打包程序三报告冒烟、源码编译、wheel 构建和 `pyside6-deploy --dry-run` 均通过。

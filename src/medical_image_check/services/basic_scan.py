@@ -33,7 +33,7 @@ from medical_image_check.infrastructure.performance import (
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
-    "generic-image-local-1+western-blot-1+dot-blot-1+fluorescence-1+pathology-2+excel-advanced-4"
+    "generic-image-local-1+western-blot-1+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4"
 )
 
 

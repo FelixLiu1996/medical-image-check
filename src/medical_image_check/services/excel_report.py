@@ -191,6 +191,11 @@ class ExcelReportExporter:
                 "斑点排列相似度",
                 "斑点强度/形态轮廓相似度",
                 "归一化排列误差",
+                "斑点局部图像相似度",
+                "最低单斑点相似度",
+                "斑点缩放比",
+                "斑点旋转角度",
+                "斑点镜像",
             ]
         )
         for finding in result.findings:
@@ -262,6 +267,11 @@ class ExcelReportExporter:
                     details.get("layout_similarity", ""),
                     details.get("profile_similarity", ""),
                     details.get("layout_error", ""),
+                    details.get("appearance_similarity", ""),
+                    details.get("minimum_spot_similarity", ""),
+                    details.get("scale_second_to_first", ""),
+                    details.get("rotation_degrees_second_to_first", ""),
+                    "是" if details.get("mirrored") else "否",
                 ]
             )
         worksheet.freeze_panes = "A2"
@@ -303,6 +313,11 @@ class ExcelReportExporter:
                 18,
                 18,
                 24,
+                20,
+                18,
+                14,
+                14,
+                12,
             ),
         )
 

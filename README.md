@@ -31,6 +31,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - [数据模型](docs/DATA_MODEL.md)
 - [界面流程](docs/UI_UX.md)
 - [测试与验收](docs/TESTING.md)
+- [Dot blot 本地评测](docs/DOT_BLOT_EVALUATION.md)
 - [发布规范](docs/RELEASE.md)
 - [跨窗口交接](MEMORY.md)
 
@@ -48,7 +49,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - 双图并排证据预览、两侧匹配矩形及匹配点/内点/覆盖率/几何变换说明；
 - Western blot 明暗极性归一化、横向条带/面板候选、分段索引，以及条带结构、排列几何和背景纹理联合验证；
 - Western blot 同图面板 Copy-Move 与跨图曝光/翻转候选，单条带敏感检测可独立启用；
-- Dot blot/斑点阵列专项检测，按归一化斑点排列识别裁剪、缩放和对比度变化；
+- Dot blot/斑点阵列专项检测，联合排列与逐斑点局部图像识别弱斑点、局部子集、裁剪、缩放、旋转、镜像和对比度变化；
 - 荧光图 DAPI/FITC/RFP/Cy5 等通道识别、同视野配准、单通道与 Merge 成分关系，以及同通道高一致复用候选；
 - 图片内容类型支持自动识别或手动指定通用、Western、Dot blot、荧光和病理，减少专项串类误报；
 - 普通病理图光密度组织掩膜、多尺度局部区域匹配、倍率识别、染色准入，以及不同倍率正常关系分类；

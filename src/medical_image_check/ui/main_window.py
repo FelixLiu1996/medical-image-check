@@ -1856,10 +1856,14 @@ def _evidence_summary_text(finding: Finding) -> str:
             f"Dot blot 证据：匹配斑点 {details.get('matched_spot_count', '-')} 个；"
             f"排列相似度 {_as_percent(details.get('layout_similarity'))}；"
             f"强度/形态轮廓 {_as_percent(details.get('profile_similarity'))}；"
+            f"局部图像 {_as_percent(details.get('appearance_similarity'))}；"
+            f"最低单斑点 {_as_percent(details.get('minimum_spot_similarity'))}；"
             f"归一化排列误差 {details.get('layout_error', '-')}；"
             f"两侧检出斑点 {details.get('first_spot_count', '-')} / "
             f"{details.get('second_spot_count', '-')}；"
-            "已允许裁剪、缩放和对比度变化。"
+            f"缩放比 {details.get('scale_second_to_first', '-')}；"
+            f"旋转 {details.get('rotation_degrees_second_to_first', '-')}°；"
+            f"镜像 {'是' if details.get('mirrored') else '否'}。"
         )
     if finding.rule_id.startswith("image.western_blot."):
         return (

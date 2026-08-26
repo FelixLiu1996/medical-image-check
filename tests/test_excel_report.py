@@ -100,6 +100,11 @@ def test_excel_report_contains_structured_dot_blot_evidence(tmp_path: Path) -> N
             "layout_similarity": 0.98,
             "profile_similarity": 0.86,
             "layout_error": 0.02,
+            "appearance_similarity": 0.91,
+            "minimum_spot_similarity": 0.82,
+            "scale_second_to_first": 1.2,
+            "rotation_degrees_second_to_first": -4.5,
+            "mirrored": False,
         },
     )
 
@@ -117,6 +122,11 @@ def test_excel_report_contains_structured_dot_blot_evidence(tmp_path: Path) -> N
     assert evidence["AF2"].value == 0.98
     assert evidence["AG2"].value == 0.86
     assert evidence["AH2"].value == 0.02
+    assert evidence["AI2"].value == 0.91
+    assert evidence["AJ2"].value == 0.82
+    assert evidence["AK2"].value == 1.2
+    assert evidence["AL2"].value == -4.5
+    assert evidence["AM2"].value == "否"
     workbook.close()
 
 
