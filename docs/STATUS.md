@@ -94,10 +94,11 @@
 - 当前开发版本为 `0.1.0a14`，扫描算法为 `generic-image-local-1+western-blot-1+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
 - Excel 工程优化本地回归已完成：正常 `rescaled` 公式列不再进入重点异常队列，默认重点候选由约 1,800 条全部线索收敛为 50 条，且三类已知阳性仍在重点队列。该结果是工作量控制，不代表 50 条均为真实异常。
 - 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
+- Dot blot `dot-blot-2` 提交 `9cd400c` 已推送开发分支，CI 与 Windows portable 均成功；用户已确认快进合入 `main`。
 
 ## 下一步
 
-1. 完成 `codex/dot-blot-algorithm-tuning` 的全量测试、Windows/Linux CI 和 Windows portable；通过并经用户确认后再合入 `main`。
+1. 将已获确认的 `codex/dot-blot-algorithm-tuning` 快进合入 `main`，随后确认 main 最新提交 CI；本轮不自动创建标签。
 2. 按 `docs/DOT_BLOT_EVALUATION.md` 继续收集授权/可合法本地使用的正负例并逐对标注；PubPeer 只作人工线索，不自动抓取。
 3. 基于隔离的 train/validation 标签校准二维点阵、稀疏非连续子集和复杂污渍输入；在真实 test 标签足够前不宣称准确率。
 4. 在 RTX 3080 Ti 参考机上运行代表性任务并导出性能诊断；GPU 后端仍单独决策。
@@ -143,6 +144,7 @@
 - `0.1.0a12` Qt offscreen 1024×720 与 1280×900 布局检查、wheel 构建、打包程序三报告冒烟、许可证收集、源码编译和 `pyside6-deploy --dry-run` 均通过。
 - 4 张真实同源 Dot blot 本地只读回归：`dot-blot-2` 自动模式下 6 组两两关系全部输出且没有其他专项串类，无读取问题，约 1.8 秒；样例未入库。
 - Dot blot 等间距负例合成微基准：25 张独立四斑点图片提取 28 个阵列候选约 1.6 秒、验证约 2.3 秒，输出 0 条专项结果。
+- Dot blot 开发分支提交 `9cd400c` 的 CI run `32989243824` 和 Windows portable run `32989243851` 均成功。
 - 13 个真实 Excel 工作簿本地只读回归：1,775 条全部线索、22 条正常派生关系、50 条重点候选；已知连续片段/配对和/结构重复阳性均在重点队列，约 6.36 秒；修复前为 9,864 条。
 - `0.1.0a13` PDF 候选层级列通过两页 A4 Poppler 全页渲染目视检查，无裁切、重叠或分页异常。
 - `0.1.0a13` Qt offscreen 打包程序三报告冒烟、源码编译、wheel 构建和 `pyside6-deploy --dry-run` 均通过。

@@ -4,7 +4,7 @@
 
 ## 当前目标
 
-Excel 工程质量优化已合入 `main`。当前开发分支为 `codex/dot-blot-algorithm-tuning`：Dot blot 已加入弱斑点响应、任意方向阵列、3–8 个近连续局部子集和逐斑点局部图像联合验证，并新增本地逐对标签评测器；尚未推送，需先完成全量测试和远程构建。
+Excel 工程质量优化已合入 `main`。本轮 Dot blot 优化位于 `codex/dot-blot-algorithm-tuning` 提交 `9cd400c`：已加入弱斑点响应、任意方向阵列、3–8 个近连续局部子集和逐斑点局部图像联合验证，并新增本地逐对标签评测器；开发分支 CI 与 Windows portable 均成功，用户已确认合入 `main`。
 
 ## 当前状态
 
@@ -76,7 +76,7 @@ Excel 工程质量优化已合入 `main`。当前开发分支为 `codex/dot-blot
 
 ## 下一步
 
-1. 完成 `codex/dot-blot-algorithm-tuning` 的全量测试、远程 CI/Windows portable；经确认后合入 `main`，不自动打标签。
+1. 将已获确认的 `codex/dot-blot-algorithm-tuning` 快进合入 `main`，随后确认 main 最新提交 CI；本轮不自动打标签。
 2. 真实图片仅本地只读使用；按 `docs/DOT_BLOT_EVALUATION.md` 逐对标注并按来源论文分组，PubPeer 不自动抓取，原始附件许可单独核查。
 3. 等授权数据规模足够后再校准二维点阵、稀疏非连续子集和真实风险边界，不用当前 4 张同源图宣称准确率。
 4. RTX 3080 Ti 性能诊断仍待参考机回传；后续 GPU 后端选择不与本轮 Dot blot 准确性优化混在同一分支。
@@ -99,6 +99,7 @@ Excel 工程质量优化已合入 `main`。当前开发分支为 `codex/dot-blot
 - `0.1.0a12` Qt offscreen 1024×720 与 1280×900 布局检查通过；wheel 构建、打包程序三报告冒烟、许可证收集、源码编译和 `pyside6-deploy --dry-run` 本地通过。
 - 4 张真实同源 Dot blot 本地只读回归在 `dot-blot-2` 自动模式下输出全部 6 组关系且没有其他专项串类，无读取问题，约 1.8 秒；样例未入库。
 - Dot blot 等间距负例合成微基准：25 张独立四斑点图片提取 28 个候选约 1.6 秒、验证约 2.3 秒，输出 0 条专项结果。
+- Dot blot 开发分支提交 `9cd400c` 的 CI run `32989243824` 和 Windows portable run `32989243851` 均成功。
 - 13 个真实 Excel 工作簿本地只读回归：`excel-advanced-4` 保留 1,775 条全部线索，识别 22 条正常派生关系，默认重点队列 50 条；MOESM9 数字片段、MOESM14 配对和为 2、MOESM15 结构重复仍在重点队列，约 6.36 秒；样例未入库。
 - `0.1.0a13` PDF 新增候选层级列后完成两页 A4 Poppler 全页渲染目视检查，表头、分页和多行位置无裁切或重叠。
 - `0.1.0a13` Qt offscreen 打包程序三报告冒烟、源码编译、wheel 构建和 `pyside6-deploy --dry-run` 通过。
