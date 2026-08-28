@@ -140,6 +140,82 @@
 - 正文图片：优先读取 `data-src`，部分页面回退到 `src`
 - 页面 JavaScript 变量可包含发布时间、`biz` 和账号标识等公开元数据
 
+#### 首选实现方法
+
+新窗口验证公开单篇文章时，首选方法不是 Chrome 浏览器自动化，而是本地终端中的只读 HTTP 获取：
+
+- Python 3.12；
+- `requests` 发送普通 `GET` 请求，设置移动端微信或常规浏览器 `User-Agent`、连接/读取超时并允许正常重定向；
+- `BeautifulSoup` 使用 `html.parser` 解析返回 HTML；
+- 不登录微信，不使用 Cookie、验证码、公众号后台、私有接口或会话令牌；
+- 只读取用户明确提供的单篇公开文章 URL，不自动遍历公众号历史文章；
+- 若运行环境明确阻止该地址，不得改换通道绕过，改为读取用户导出的 HTML/PDF/Word/图片包。
+
+最小读取示例：
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import requests
+from bs4 import BeautifulSoup
+
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.50"
+    )
+}
+
+
+@dataclass(frozen=True)
+class PublicArticle:
+    final_url: str
+    status_code: int
+    raw_html: bytes
+    title: str
+    account: str
+    body_text: str
+    image_urls: tuple[str, ...]
+
+
+def read_public_article(url: str) -> PublicArticle:
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=(10, 30),
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.content, "html.parser")
+    content = soup.select_one("#js_content")
+    if content is None:
+        raise ValueError("页面缺少 #js_content，可能不是完整公开文章")
+
+    title_node = soup.select_one("#activity-name")
+    account_node = soup.select_one("#js_name, .rich_media_meta_nickname")
+    image_urls = tuple(
+        url_value
+        for image in content.select("img")
+        if (url_value := image.get("data-src") or image.get("src"))
+    )
+
+    return PublicArticle(
+        final_url=response.url,
+        status_code=response.status_code,
+        raw_html=response.content,
+        title=title_node.get_text(" ", strip=True) if title_node else "",
+        account=account_node.get_text(" ", strip=True) if account_node else "",
+        body_text=content.get_text("\n", strip=True),
+        image_urls=image_urls,
+    )
+```
+
+该示例只负责取得原始 HTML、完整正文和图片 URL，不包含批量抓取、图片重编码、论文检索或训练样本生成。若把 `requests`、`beautifulsoup4` 引入仓库开发依赖，必须同步依赖约束和许可证登记；一次性验证也可以在独立临时环境运行。
+
 推荐的单篇文章获取步骤：
 
 1. 使用当时安全策略允许的 HTTPS 客户端请求用户给出的完整公开文章 URL，设置合理超时并允许正常重定向；不得使用登录 Cookie、公众号后台凭据或绕过验证页面。
