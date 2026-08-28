@@ -1,6 +1,6 @@
 # 项目状态
 
-最后更新：2026-08-27
+最后更新：2026-08-28
 
 ## 已完成
 
@@ -91,22 +91,25 @@
 - 轻量反馈已合入并推送 `main`（`2d9ea57`），开发分支和 main CI 均通过。
 - Dot blot 已升级为局部背景弱斑点候选、任意方向阵列、3–8 个近连续局部子集和逐斑点局部图像联合验证；同一页对只保留最佳结果，相同排列但局部内容不相容的合成负例已被拒绝。
 - 增加本地 Dot blot 逐对标签清单评测器，输出 TP/FP/FN/TN 等指标并校验同一来源组不跨数据集；不下载、复制或提交真实图片。
-- 当前开发版本为 `0.1.0a14`，扫描算法为 `generic-image-local-1+western-blot-1+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
+- 当前开发版本为 `0.1.0a15`，扫描算法为 `generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
 - Excel 工程优化本地回归已完成：正常 `rescaled` 公式列不再进入重点异常队列，默认重点候选由约 1,800 条全部线索收敛为 50 条，且三类已知阳性仍在重点队列。该结果是工作量控制，不代表 50 条均为真实异常。
 - 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
 - Dot blot `dot-blot-2` 提交 `9cd400c` 已推送开发分支，CI 与 Windows portable 均成功；用户已确认快进合入 `main`。
+- 已在 `codex/image-benchmark-v1` 建立通用医学图片逐对本地评测器，支持同图/跨图区域、按类型运行、Western 单条带开关、来源组隔离及分类型指标；真实图片和清单继续只存在于 Git 忽略目录。
+- 第一版本地 validation 整理出 39 对：26 对阳性、13 对阴性，覆盖 Western blot、免疫荧光、普通病理和细胞明场；Dot blot 暂缓。去除可见彩框并优先换用未画框原图后，`western-blot-1` 基线为 11 TP、1 FP、15 FN、12 TN；`western-blot-2` 定向修正后为 16 TP、0 FP、10 FN、13 TN。该结果只用于同集回归，不是正式准确率。
+- 医学人员已逐对确认首轮 Western blot 的 5 个漏报均为重复，唯一误报（阴性论文第 15 页 G/H 的 beta-actin）为不重复；`western-blot-2` 在这 11 对 Western validation 上为 7 TP、0 FP、0 FN、4 TN。此前确认的 Casp11/NEDD4 目标条带及其 beta-actin 对仍被正确排除。
 
 ## 下一步
 
-1. 将已获确认的 `codex/dot-blot-algorithm-tuning` 快进合入 `main`，随后确认 main 最新提交 CI；本轮不自动创建标签。
-2. 按 `docs/DOT_BLOT_EVALUATION.md` 继续收集授权/可合法本地使用的正负例并逐对标注；PubPeer 只作人工线索，不自动抓取。
-3. 基于隔离的 train/validation 标签校准二维点阵、稀疏非连续子集和复杂污渍输入；在真实 test 标签足够前不宣称准确率。
-4. 在 RTX 3080 Ti 参考机上运行代表性任务并导出性能诊断；GPU 后端仍单独决策。
+1. 由医学人员优先复核首轮阳性对，特别是只依据来源彩框、局部过小或缩放较大的案例；未确认项不得进入 test。
+2. 锁定当前 Western 阈值，补充来源隔离的新 Western 阳性和相似内参阴性，验证窄条带行回退能否泛化；在新样本到来前不继续围绕这 11 对调参。
+3. 继续补充来源隔离的 Western、HE/IHC 和免疫荧光困难阴性及真实阳性；Dot blot 按用户决定暂缓。
+4. 建立从未参与调参的 test 集后再报告准确率；RTX 3080 Ti 性能诊断与算法准确性工作保持分离。
 
 ## 阻塞或待定
 
-- 验收样例数据待用户向团队确认。
-- 算法准确率与阈值待样例校准。
+- 第一批 validation 已建立，但部分阳性仍只有来源标记，缺少逐对独立医学确认；独立 test 集尚未形成。
+- 算法准确率与阈值仍待更多来源隔离样例校准；当前 39 对结果不得对外宣传为准确率。
 - GPU 性能画像已经实现，但 GPU 后端、依赖选择和加速效果仍待 RTX 3080 Ti 实测后确认；当前版本不得宣传为 CUDA 加速版。
 - RTX 3080 Ti 参考机的驱动版本、OpenCV CUDA 状态和真实性能诊断尚未回传。
 - 是否在 Excel、HTML、PDF 报告中增加左右原表上下文及黄色命中高亮，待与试用用户确认；当前只有 GUI 支持该预览，报告仍输出结构化位置和数值证据，暂不开发此增强。
@@ -131,10 +134,8 @@
 
 ## 最新验证
 
-- Python 3.12.13
-- Ruff 检查与格式检查通过
-- `pip check` 通过
-- pytest 119 项通过；新增 Dot blot 弱斑点、3/8 局部子集、常见等间距排列/不相容内容负例和本地评测清单测试，并保留既有 Excel/GUI 回归。
+- Windows 本地 Python 3.12.10；Ruff 检查与格式检查通过，`pip check` 通过。
+- `QT_QPA_PLATFORM=offscreen` 下 pytest 123 项全部通过；包含通用图片逐对评测、窄条带行缩放/翻转和 Western 低覆盖细长局部证据过滤回归，并保留既有 Dot blot、Excel 和 GUI 测试。
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过

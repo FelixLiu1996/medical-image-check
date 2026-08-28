@@ -1,10 +1,10 @@
 # 跨窗口交接
 
-最后更新：2026-08-27
+最后更新：2026-08-28
 
 ## 当前目标
 
-Excel 工程质量优化已合入 `main`。本轮 Dot blot 优化位于 `codex/dot-blot-algorithm-tuning` 提交 `9cd400c`：已加入弱斑点响应、任意方向阵列、3–8 个近连续局部子集和逐斑点局部图像联合验证，并新增本地逐对标签评测器；开发分支 CI 与 Windows portable 均成功，用户已确认合入 `main`。
+当前在 `codex/image-benchmark-v1` 整理首批真实医学图片 validation，并新增覆盖 Western blot、免疫荧光、普通病理和细胞明场的通用逐对本地评测器。Dot blot 按用户决定暂缓；真实图片、裁剪、清单和结果只保存在 Git 忽略目录。
 
 ## 当前状态
 
@@ -42,7 +42,8 @@ Excel 工程质量优化已合入 `main`。本轮 Dot blot 优化位于 `codex/d
 - Excel 数值单元格读取已增加最近同列表头、表头行和只读公式引用元数据；序列按表格区块分段，明确编号段不进入数值规则。
 - 同排公式或明确 `rescaled`/归一化表头支持的固定换算已分类为正常派生关系；全部规则仍保留，但数据界面默认展示跨规则归并、按来源配额且最多 50 条的重点候选，可切换全部线索。
 - ADR-0006 已记录“完整线索 + 有界重点候选”策略；三种报告记录候选层级，HTML 支持层级筛选。
-- 本地开发版本为 `0.1.0a14`，扫描算法版本为 `generic-image-local-1+western-blot-1+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`。
+- 本地开发版本为 `0.1.0a15`，扫描算法版本为 `generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`。
+- 2026-08-28 医学复核确认首轮 Western blot 的 5 个 FN 均为重复、唯一 FP（阴性论文第 15 页 G/H beta-actin）确为不重复；`western-blot-2` 增加窄条带行缩放/翻转回退和细长低覆盖通用证据过滤后，同一 11 对 validation 为 7 TP/0 FP/0 FN/4 TN。该结果不得作为独立准确率，下一步必须使用来源隔离的新样本验证。
 
 ## 已确认的重要方向
 
@@ -63,7 +64,7 @@ Excel 工程质量优化已合入 `main`。本轮 Dot blot 优化位于 `codex/d
 
 ## 待定或阻塞
 
-- 图像和 Excel 验收样例数据待用户向团队确认后提供。
+- 第一批图片 validation 已建立，但来源标记阳性仍需逐对医学确认，独立 test 集尚未形成。
 - 算法准确率和最终阈值需依据验收数据校准。
 - 历史库持久化仍需单独 ADR；GPU 已通过 ADR-0005 确认“先性能画像、后后端选择”，真正 CUDA 后端仍未实现。
 - RTX 3080 Ti 参考机的驱动版本、`nvidia-smi` 探测结果和真实性能诊断尚待 Windows portable 实机回传。
@@ -76,12 +77,17 @@ Excel 工程质量优化已合入 `main`。本轮 Dot blot 优化位于 `codex/d
 
 ## 下一步
 
-1. 将已获确认的 `codex/dot-blot-algorithm-tuning` 快进合入 `main`，随后确认 main 最新提交 CI；本轮不自动打标签。
-2. 真实图片仅本地只读使用；按 `docs/DOT_BLOT_EVALUATION.md` 逐对标注并按来源论文分组，PubPeer 不自动抓取，原始附件许可单独核查。
-3. 等授权数据规模足够后再校准二维点阵、稀疏非连续子集和真实风险边界，不用当前 4 张同源图宣称准确率。
-4. RTX 3080 Ti 性能诊断仍待参考机回传；后续 GPU 后端选择不与本轮 Dot blot 准确性优化混在同一分支。
+1. 医学人员逐对复核首轮阳性，未确认项继续留在 validation，不进入 test。
+2. 使用来源隔离的新 Western 阳性和相似内参阴性验证 `western-blot-2`，不再围绕当前 11 对继续调参；随后处理细胞明场和荧光小区域漏报。
+3. 补足来源隔离的 Western、HE/IHC 和免疫荧光正负例；Dot blot 暂缓，不阻塞第一阶段。
+4. 建立未参与调参的 test 集后再报告准确率；RTX 3080 Ti 性能诊断仍与准确性优化分开。
 
 ## 验证状态
+
+本次 Windows 开发分支验证：
+
+- Python 3.12.10，`ruff check`、`ruff format --check` 和 `pip check` 通过。
+- `QT_QPA_PLATFORM=offscreen` 下 pytest 123 项全部通过；新增通用图片逐对评测、窄条带行缩放/翻转和 Western 低覆盖细长局部证据过滤回归。
 
 本地 macOS ARM64、Python 3.12.13：
 

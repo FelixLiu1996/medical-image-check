@@ -3,7 +3,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from medical_image_check.engines.image_similarity import ImageDuplicateDetector
+from medical_image_check.domain.image_settings import ImageAnalysisMode
+from medical_image_check.domain.models import EvidenceLocation, Finding, FindingType, RiskLevel
+from medical_image_check.engines.image_similarity import (
+    ImageDuplicateDetector,
+    _is_low_coverage_western_local,
+)
 from medical_image_check.engines.western_blot import WesternBlotDuplicateDetector
 
 
@@ -46,6 +51,24 @@ def _synthetic_single_band(seed: int) -> np.ndarray:
     overlay = image.astype(np.float32)
     cv2.ellipse(overlay, (120, 80), (28, 8), 0, 0, 360, 45, -1)
     return np.clip(cv2.GaussianBlur(overlay, (5, 5), 0.8), 0, 255).astype(np.uint8)
+
+
+def _synthetic_short_strip(seed: int) -> np.ndarray:
+    random = np.random.default_rng(seed)
+    height, width = 38, 180
+    y_grid, x_grid = np.mgrid[:height, :width]
+    image = np.clip(
+        222
+        + 3 * np.sin(x_grid / 19)
+        + 2 * np.cos(y_grid / 7)
+        + random.normal(0, 1.8, (height, width)),
+        0,
+        255,
+    ).astype(np.uint8)
+    overlay = image.astype(np.float32)
+    cv2.ellipse(overlay, (45, 19), (25, 5), 0, 0, 360, 48, -1)
+    cv2.ellipse(overlay, (132, 18), (18, 4), 0, 0, 360, 92, -1)
+    return np.clip(cv2.GaussianBlur(overlay, (5, 5), 0.9), 0, 255).astype(np.uint8)
 
 
 def test_detector_finds_flipped_exposure_changed_blot_panel(tmp_path: Path) -> None:
@@ -127,6 +150,73 @@ def test_single_band_detection_is_opt_in_and_stays_low_risk(tmp_path: Path) -> N
     assert sensitive_findings[0].rule_id == "image.western_blot.single_band"
     assert sensitive_findings[0].risk == "low"
     assert sensitive_findings[0].details["single_band_mode"] is True
+
+
+def test_sensitive_mode_finds_resized_flipped_short_strip(tmp_path: Path) -> None:
+    original = _synthetic_short_strip(3)
+    reused = cv2.resize(
+        np.fliplr(original),
+        (108, 26),
+        interpolation=cv2.INTER_AREA,
+    )
+    reused = np.clip(reused.astype(np.float32) * 0.83 + 31, 0, 255).astype(np.uint8)
+    first = tmp_path / "first-strip.png"
+    second = tmp_path / "second-strip.png"
+    assert cv2.imwrite(str(first), original)
+    assert cv2.imwrite(str(second), reused)
+
+    findings, issues = WesternBlotDuplicateDetector(True).scan([first, second])
+
+    assert issues == []
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.rule_id == "image.western_blot.single_band"
+    assert finding.risk == "low"
+    assert finding.details["strip_fallback"] is True
+    assert finding.details["transform_second_to_first"] == "flip_horizontal"
+    assert finding.details["horizontal_profile_similarity"] >= 0.90
+
+
+def test_western_mode_rejects_low_coverage_elongated_local_match() -> None:
+    finding = Finding(
+        finding_id="low-coverage-western-local",
+        rule_id="image.local.geometric",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.LOW,
+        title="局部匹配",
+        description="仅匹配条带中的很小一段",
+        locations=(EvidenceLocation("first.png"), EvidenceLocation("second.png")),
+        confidence=0.51,
+        details={
+            "first_coverage": 0.13,
+            "second_coverage": 0.14,
+            "first_region_width": 161,
+            "first_region_height": 15,
+            "second_region_width": 154,
+            "second_region_height": 15,
+        },
+    )
+
+    assert _is_low_coverage_western_local(finding, ImageAnalysisMode.WESTERN_BLOT) is True
+    assert _is_low_coverage_western_local(finding, ImageAnalysisMode.GENERIC) is False
+
+    compact_details = dict(finding.details)
+    compact_details["first_region_width"] = 68
+    compact_details["first_region_height"] = 21
+    compact_details["second_region_width"] = 68
+    compact_details["second_region_height"] = 19
+    compact = Finding(
+        finding_id="compact-western-local",
+        rule_id=finding.rule_id,
+        finding_type=finding.finding_type,
+        risk=finding.risk,
+        title=finding.title,
+        description=finding.description,
+        locations=finding.locations,
+        confidence=finding.confidence,
+        details=compact_details,
+    )
+    assert _is_low_coverage_western_local(compact, ImageAnalysisMode.WESTERN_BLOT) is False
 
 
 def test_western_blot_detector_is_integrated_with_general_image_scan(tmp_path: Path) -> None:
