@@ -219,8 +219,11 @@ class ImageDuplicateDetector:
                 finding
                 for finding in findings
                 if not (
-                    finding.rule_id in {self.perceptual_rule_id, self.local_rule_id}
-                    and _finding_page_pair(finding) in specialist_pairs
+                    (
+                        finding.rule_id in {self.perceptual_rule_id, self.local_rule_id}
+                        and _finding_page_pair(finding) in specialist_pairs
+                    )
+                    or _is_low_coverage_western_local(finding, self.analysis_mode)
                 )
             ]
         record_items(profiler, "image.result_deduplication", len(findings))
@@ -407,6 +410,42 @@ LOCAL_MATCH_RATIO = 0.80
 LOCAL_MIN_MATCHES = 8
 LOCAL_MIN_INLIERS = 8
 LOCAL_MIN_INLIER_RATIO = 0.50
+WESTERN_LOCAL_MIN_COVERAGE = 0.18
+WESTERN_LOCAL_MIN_ELONGATION = 6.0
+
+
+def _is_low_coverage_western_local(
+    finding: Finding,
+    analysis_mode: ImageAnalysisMode,
+) -> bool:
+    if (
+        analysis_mode != ImageAnalysisMode.WESTERN_BLOT
+        or finding.rule_id != "image.local.geometric"
+    ):
+        return False
+    coverages = (
+        finding.details.get("first_coverage"),
+        finding.details.get("second_coverage"),
+    )
+    numeric_coverages = [float(value) for value in coverages if isinstance(value, (int, float))]
+    region_sizes = (
+        (finding.details.get("first_region_width"), finding.details.get("first_region_height")),
+        (
+            finding.details.get("second_region_width"),
+            finding.details.get("second_region_height"),
+        ),
+    )
+    elongations = [
+        float(width) / max(float(height), 1.0)
+        for width, height in region_sizes
+        if isinstance(width, (int, float)) and isinstance(height, (int, float))
+    ]
+    return (
+        bool(numeric_coverages)
+        and min(numeric_coverages) < WESTERN_LOCAL_MIN_COVERAGE
+        and bool(elongations)
+        and min(elongations) >= WESTERN_LOCAL_MIN_ELONGATION
+    )
 
 
 @dataclass(frozen=True, slots=True)

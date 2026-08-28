@@ -28,6 +28,11 @@ from medical_image_check.infrastructure.images import (
 
 WESTERN_MAX_DIMENSION = 1400
 WESTERN_STRUCTURE_SIZE = (96, 32)
+WESTERN_STRIP_STRUCTURE_SIZE = (256, 64)
+WESTERN_STRIP_PROFILE_SIZE = 128
+WESTERN_STRIP_MIN_ASPECT_RATIO = 2.0
+WESTERN_STRIP_MAX_HEIGHT = 160
+WESTERN_STRIP_CANDIDATE_MIN_VOTES = 2
 WESTERN_MAX_BANDS_PER_PAGE = 256
 WESTERN_MAX_MULTI_BAND_REGIONS = 24
 WESTERN_MAX_SINGLE_BAND_REGIONS = 24
@@ -79,6 +84,9 @@ class WesternRegion:
     background_texture: NDArray[np.float32]
     fingerprints: tuple[WesternFingerprint, ...]
     single_band: bool = False
+    horizontal_profile: NDArray[np.float32] | None = None
+    strip_fallback: bool = False
+    profile_fingerprints: tuple[WesternFingerprint, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +98,9 @@ class _WesternMatch:
     geometry_similarity: float
     matched_band_count: int
     confidence: float
+    profile_similarity: float = 0.0
+    strip_scale_ratio: float = 1.0
+    strip_fallback: bool = False
 
 
 class WesternBlotDuplicateDetector:
@@ -156,7 +167,15 @@ class WesternBlotDuplicateDetector:
             if match is None:
                 continue
             locations = (_location(first), _location(second))
-            if first.single_band:
+            if first.strip_fallback:
+                rule_id = self.single_band_rule_id
+                risk = RiskLevel.LOW
+                title = "Western blot 条带行高度相似"
+                description = (
+                    "窄条带行在缩放或翻转后具有高度相似的横向强度轮廓；"
+                    "此类证据必须结合条带边缘和背景人工复核。"
+                )
+            elif first.single_band:
                 rule_id = self.single_band_rule_id
                 risk = RiskLevel.LOW
                 title = "Western blot 单条带高度相似"
@@ -210,14 +229,19 @@ def _extract_page_regions(
     light_bands, light_mask = _detect_bands(light_response)
     dark_score = _band_set_score(dark_bands)
     light_score = _band_set_score(light_bands)
+    strip_region = (
+        _strip_fallback_region(source_path, page, page_count, processing, scale)
+        if include_single_band
+        else None
+    )
     if dark_score <= 0 and light_score <= 0:
-        return []
+        return [strip_region] if strip_region is not None else []
     if light_score > dark_score:
         response, bands, mask, polarity = light_response, light_bands, light_mask, "light"
     else:
         response, bands, mask, polarity = dark_response, dark_bands, dark_mask, "dark"
     if len(bands) > WESTERN_MAX_BANDS_PER_PAGE:
-        return []
+        return [strip_region] if strip_region is not None else []
 
     row_groups = _group_band_rows(bands, processing.shape[0], processing.shape[1])
     region_groups = [group for group in row_groups if len(group) >= 2]
@@ -281,7 +305,81 @@ def _extract_page_regions(
                 single_band=single_band,
             )
         )
+    if strip_region is not None:
+        regions.append(strip_region)
     return regions
+
+
+def _strip_fallback_region(
+    source_path: str,
+    page: int,
+    page_count: int,
+    gray: NDArray[np.uint8],
+    scale: float,
+) -> WesternRegion | None:
+    height, width = gray.shape[:2]
+    if (
+        height < 10
+        or width < 48
+        or height > WESTERN_STRIP_MAX_HEIGHT
+        or width / max(height, 1) < WESTERN_STRIP_MIN_ASPECT_RATIO
+    ):
+        return None
+
+    dark_response, light_response = _foreground_responses(gray)
+    dark_strength = float(np.percentile(dark_response, 95))
+    light_strength = float(np.percentile(light_response, 95))
+    if light_strength > dark_strength:
+        response, polarity = light_response, "light"
+    else:
+        response, polarity = dark_response, "dark"
+    positive = response[response > 0]
+    threshold = float(np.percentile(positive, 72)) if positive.size else float("inf")
+    mask = np.asarray(response >= max(3.0, threshold), dtype=np.uint8)
+    structure = _standardize(
+        cv2.resize(
+            cv2.GaussianBlur(gray, (0, 0), sigmaX=0.8, sigmaY=0.8),
+            WESTERN_STRIP_STRUCTURE_SIZE,
+            interpolation=cv2.INTER_AREA,
+        )
+    )
+    profile = np.mean(gray.astype(np.float32), axis=0).reshape(1, -1)
+    profile = cv2.resize(
+        profile,
+        (WESTERN_STRIP_PROFILE_SIZE, 1),
+        interpolation=cv2.INTER_AREA,
+    ).reshape(-1)
+    profile = _standardize(profile)
+    resized_mask = cv2.resize(
+        mask,
+        WESTERN_STRIP_STRUCTURE_SIZE,
+        interpolation=cv2.INTER_NEAREST,
+    ).astype(np.float32)
+    fingerprints = tuple(
+        WesternFingerprint(transform, _perceptual_hash(_apply_transform(structure, transform)))
+        for transform in WESTERN_TRANSFORMS
+    )
+    profile_fingerprints = (
+        WesternFingerprint("identity", _profile_hash(profile)),
+        WesternFingerprint("flip_horizontal", _profile_hash(profile[::-1])),
+    )
+    return WesternRegion(
+        source_path=source_path,
+        page=page,
+        page_count=page_count,
+        panel=WESTERN_MAX_MULTI_BAND_REGIONS + WESTERN_MAX_SINGLE_BAND_REGIONS + 1,
+        region=_restore_box((0, 0, width, height), scale),
+        polarity=polarity,
+        bands=(),
+        structure=structure,
+        band_mask=resized_mask,
+        background_texture=np.zeros(WESTERN_STRUCTURE_SIZE[::-1], dtype=np.float32),
+        fingerprints=fingerprints,
+        single_band=True,
+        horizontal_profile=profile,
+        strip_fallback=True,
+        profile_fingerprints=profile_fingerprints,
+    )
 
 
 def _foreground_responses(
@@ -446,6 +544,16 @@ def _perceptual_hash(values: NDArray[np.float32]) -> int:
     return int.from_bytes(np.packbits(bits.reshape(-1)).tobytes(), "big")
 
 
+def _profile_hash(profile: NDArray[np.float32]) -> int:
+    resized = cv2.resize(
+        profile.reshape(1, -1),
+        (64, 1),
+        interpolation=cv2.INTER_AREA,
+    ).reshape(-1)
+    bits = resized > float(np.median(resized))
+    return int.from_bytes(np.packbits(bits).tobytes(), "big")
+
+
 def _apply_transform(values: NDArray, transform: str) -> NDArray:
     if transform == "identity":
         return values
@@ -462,6 +570,8 @@ def _candidate_pairs(regions: list[WesternRegion]) -> set[tuple[int, int]]:
     index: dict[tuple[bool, int, int], list[int]] = defaultdict(list)
     votes: dict[tuple[int, int], int] = defaultdict(int)
     for region_index, region in enumerate(regions):
+        if region.strip_fallback:
+            continue
         seen_keys: set[tuple[bool, int, int]] = set()
         for fingerprint in region.fingerprints:
             for band in range(8):
@@ -475,7 +585,29 @@ def _candidate_pairs(regions: list[WesternRegion]) -> set[tuple[int, int]]:
                         if not _same_or_overlapping_region(regions[previous], region):
                             votes[(previous, region_index)] += 1
                     bucket.append(region_index)
-    return {pair for pair, count in votes.items() if count >= WESTERN_CANDIDATE_MIN_VOTES}
+    candidates = {pair for pair, count in votes.items() if count >= WESTERN_CANDIDATE_MIN_VOTES}
+    profile_index: dict[tuple[int, int], list[int]] = defaultdict(list)
+    profile_votes: dict[tuple[int, int], int] = defaultdict(int)
+    for region_index, region in enumerate(regions):
+        if not region.strip_fallback:
+            continue
+        seen_keys: set[tuple[int, int]] = set()
+        for fingerprint in region.profile_fingerprints:
+            for band in range(8):
+                key = (band, (fingerprint.value >> (band * 8)) & 0xFF)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                bucket = profile_index[key]
+                if len(bucket) <= WESTERN_INDEX_BUCKET_LIMIT:
+                    for previous in bucket:
+                        if not _same_or_overlapping_region(regions[previous], region):
+                            profile_votes[(previous, region_index)] += 1
+                    bucket.append(region_index)
+    candidates.update(
+        pair for pair, count in profile_votes.items() if count >= WESTERN_STRIP_CANDIDATE_MIN_VOTES
+    )
+    return candidates
 
 
 def _same_or_overlapping_region(first: WesternRegion, second: WesternRegion) -> bool:
@@ -502,6 +634,10 @@ def _intersection_over_union(
 
 
 def _best_match(first: WesternRegion, second: WesternRegion) -> _WesternMatch | None:
+    if first.strip_fallback or second.strip_fallback:
+        if not (first.strip_fallback and second.strip_fallback):
+            return None
+        return _best_strip_match(first, second)
     if abs(len(first.bands) - len(second.bands)) > max(
         1, min(len(first.bands), len(second.bands)) // 2
     ):
@@ -559,6 +695,56 @@ def _best_match(first: WesternRegion, second: WesternRegion) -> _WesternMatch | 
             geometry_similarity=geometry_similarity,
             matched_band_count=matched_band_count,
             confidence=confidence,
+        )
+        if best is None or candidate.confidence > best.confidence:
+            best = candidate
+    return best
+
+
+def _best_strip_match(first: WesternRegion, second: WesternRegion) -> _WesternMatch | None:
+    if first.horizontal_profile is None or second.horizontal_profile is None:
+        return None
+    first_width = first.region[2]
+    second_width = second.region[2]
+    scale_ratio = max(
+        first_width / max(second_width, 1),
+        second_width / max(first_width, 1),
+    )
+    best: _WesternMatch | None = None
+    for transform in WESTERN_TRANSFORMS:
+        transformed_structure = _apply_transform(second.structure, transform)
+        structure_similarity = abs(normalized_similarity(first.structure, transformed_structure))
+        transformed_profile = (
+            second.horizontal_profile[::-1]
+            if transform in {"flip_horizontal", "rotate_180"}
+            else second.horizontal_profile
+        )
+        profile_similarity = abs(
+            normalized_similarity(first.horizontal_profile, transformed_profile)
+        )
+        horizontally_flipped = transform in {"flip_horizontal", "rotate_180"}
+        accepted = (
+            horizontally_flipped and structure_similarity >= 0.78 and profile_similarity >= 0.90
+        ) or (
+            not horizontally_flipped
+            and scale_ratio >= 1.30
+            and structure_similarity >= 0.88
+            and profile_similarity >= 0.97
+        )
+        if not accepted:
+            continue
+        confidence = min(1.0, 0.58 * structure_similarity + 0.42 * profile_similarity)
+        candidate = _WesternMatch(
+            transform=transform,
+            structure_similarity=structure_similarity,
+            background_similarity=0.0,
+            mask_iou=0.0,
+            geometry_similarity=profile_similarity,
+            matched_band_count=0,
+            confidence=confidence,
+            profile_similarity=profile_similarity,
+            strip_scale_ratio=scale_ratio,
+            strip_fallback=True,
         )
         if best is None or candidate.confidence > best.confidence:
             best = candidate
@@ -698,6 +884,9 @@ def _match_details(
         "band_mask_iou": round(match.mask_iou, 6),
         "geometry_similarity": round(match.geometry_similarity, 6),
         "single_band_mode": first.single_band,
+        "strip_fallback": match.strip_fallback,
+        "horizontal_profile_similarity": round(match.profile_similarity, 6),
+        "strip_scale_ratio": round(match.strip_scale_ratio, 6),
         "first_bands": [_band_details(band) for band in first.bands],
         "second_bands": [_band_details(band) for band in second.bands],
     }
@@ -718,7 +907,9 @@ def _location(region: WesternRegion) -> EvidenceLocation:
     if region.page_count > 1:
         parts.append(f"第 {region.page} 页")
     parts.append(f"Western 面板 {region.panel}")
-    if region.single_band:
+    if region.strip_fallback:
+        parts.append("窄条带行")
+    elif region.single_band:
         parts.append("单条带")
     return EvidenceLocation(region.source_path, coordinate="；".join(parts))
 
