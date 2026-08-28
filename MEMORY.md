@@ -4,7 +4,7 @@
 
 ## 当前目标
 
-当前在 `codex/image-benchmark-v1` 整理首批真实医学图片 validation，并新增覆盖 Western blot、免疫荧光、普通病理和细胞明场的通用逐对本地评测器。Dot blot 按用户决定暂缓；真实图片、裁剪、清单和结果只保存在 Git 忽略目录。
+当前在 `codex/wechat-paper-dataset-feasibility` 完成首篇 Figcheck 公众号论文数据链路试点和文档交接。真实公众号正文、标注图、论文 Figure、附件响应、清单和报告只保存在 Git 忽略目录；该方向尚未进入 PRD 或正式开发。
 
 ## 当前状态
 
@@ -44,7 +44,8 @@
 - ADR-0006 已记录“完整线索 + 有界重点候选”策略；三种报告记录候选层级，HTML 支持层级筛选。
 - 本地开发版本为 `0.1.0a15`，扫描算法版本为 `generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`。
 - 2026-08-28 医学复核确认首轮 Western blot 的 5 个 FN 均为重复、唯一 FP（阴性论文第 15 页 G/H beta-actin）确为不重复；`western-blot-2` 增加窄条带行缩放/翻转回退和细长低覆盖通用证据过滤后，同一 11 对 validation 为 7 TP/0 FP/0 FN/4 TN。该结果不得作为独立准确率，下一步必须使用来源隔离的新样本验证。
-- 已将“科研诚信公众号公开标注 -> 合法干净论文图片 -> 本地训练/评测样本”的可行性讨论、默认负例规则、许可证边界和首篇 Figcheck 试点交接整理到 `docs/WECHAT_PAPER_DATASET_FEASIBILITY.md`；该方向尚未进入 PRD 或正式开发。
+- 首篇 Figcheck 试点已取得完整公众号正文和 33 张实际图片，唯一定位 DOI `10.1093/nar/gky665`、PMID `30085206`、PMCID `PMC6125622`，核实论文已正式撤稿且许可证为 CC BY-NC 4.0，并取得主文 Figure 1–7。公众号的 37 处文字口径已全部解析；用户确认首轮只处理正式全文主文 Figure，当前范围为 31 处且精确双区域映射仍为 0/31，Supplement 相关 6 处延后。
+- `docs/WECHAT_PAPER_DATASET_FEASIBILITY.md` 已补充 Supplement 的官方来源定位、实际字节/ZIP/哈希校验、浏览器验证、验证码、企业 MDM/DLP 阻塞和合规回退流程；不得关闭安全扩展或修改组织策略绕过下载。
 
 ## 已确认的重要方向
 
@@ -75,7 +76,7 @@
 - Western blot 当前只形成明显横向条带行候选，复杂排版、弱条带、文字标签、任意擦除/拼接仍待验收数据和后续算法覆盖。
 - Excel 已确认规则的全局扫描 Alpha 基线已实现；自动识别实验组和手动框选区域尚未实现。重点队列是工程排序而非准确率结论；全部线索中统计相似始终只标低风险。
 - Dot blot 已用局部内容验证拒绝暗底划痕和相同排列但内容不相容的合成负例，并稳定命中一侧 3 个斑点与另一侧 8 个斑点的局部子集；二维网格、任意稀疏子集和真实误报边界仍需更多逐对标签。
-- 公众号论文样本链路只完成方案记录；首篇 Figcheck 文章的实际 HTML、33 张图片、对应论文身份、干净 Figure 和样本清单尚未在本地取得或验证。
+- 当前主文范围 31 处尚未迁移为无框干净原图上的明确双区域，正例 0、默认负例 0、`unknown` 31；Figure S19/S25 相关 6 处标记 `deferred_supplement`，不阻塞当前试点。
 
 ## 下一步
 
@@ -83,6 +84,7 @@
 2. 使用来源隔离的新 Western 阳性和相似内参阴性验证 `western-blot-2`，不再围绕当前 11 对继续调参；随后处理细胞明场和荧光小区域漏报。
 3. 补足来源隔离的 Western、HE/IHC 和免疫荧光正负例；Dot blot 暂缓，不阻塞第一阶段。
 4. 建立未参与调参的 test 集后再报告准确率；RTX 3080 Ti 性能诊断仍与准确性优化分开。
+5. 先完成首篇论文主文 Figure 范围内 31 处精确区域复核，并提出能表达聚合声明、`unknown`、`deferred_supplement` 和 `review_status` 的候选清单 schema；Supplement 后续按需扩展。
 
 ## 验证状态
 
