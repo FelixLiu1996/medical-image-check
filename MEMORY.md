@@ -88,6 +88,7 @@
 
 - Python 3.12.10，`ruff check`、`ruff format --check` 和 `pip check` 通过。
 - `QT_QPA_PLATFORM=offscreen` 下 pytest 123 项全部通过；新增通用图片逐对评测、窄条带行缩放/翻转和 Western 低覆盖细长局部证据过滤回归。
+- 开发分支提交 `49c99f1` 已推送；GitHub CI run `33147098251`（Windows/Linux）和 Windows portable run `33147098252` 均成功。
 
 本地 macOS ARM64、Python 3.12.13：
 
