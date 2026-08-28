@@ -146,6 +146,7 @@
 - 4 张真实同源 Dot blot 本地只读回归：`dot-blot-2` 自动模式下 6 组两两关系全部输出且没有其他专项串类，无读取问题，约 1.8 秒；样例未入库。
 - Dot blot 等间距负例合成微基准：25 张独立四斑点图片提取 28 个阵列候选约 1.6 秒、验证约 2.3 秒，输出 0 条专项结果。
 - Dot blot 开发分支提交 `9cd400c` 的 CI run `32989243824` 和 Windows portable run `32989243851` 均成功。
+- 图片 validation 与 Western 改进提交 `49c99f1` 的 [CI run 33147098251](https://github.com/FelixLiu1996/medical-image-check/actions/runs/33147098251) 和 [Windows portable run 33147098252](https://github.com/FelixLiu1996/medical-image-check/actions/runs/33147098252) 均成功。
 - 13 个真实 Excel 工作簿本地只读回归：1,775 条全部线索、22 条正常派生关系、50 条重点候选；已知连续片段/配对和/结构重复阳性均在重点队列，约 6.36 秒；修复前为 9,864 条。
 - `0.1.0a13` PDF 候选层级列通过两页 A4 Poppler 全页渲染目视检查，无裁切、重叠或分页异常。
 - `0.1.0a13` Qt offscreen 打包程序三报告冒烟、源码编译、wheel 构建和 `pyside6-deploy --dry-run` 均通过。
