@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from openpyxl import Workbook
 
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.services.basic_scan import (
     BasicScanService,
     ScanCancelled,
@@ -41,7 +42,8 @@ def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) ->
         "excel.cell.target_operation",
     }
     assert result.algorithm_version == (
-        "generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4"
+        "generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+"
+        "panel-split-1+excel-advanced-4"
     )
     assert result.completed_at is not None
     assert result.performance is not None
@@ -105,6 +107,63 @@ def test_basic_scan_mode_filters_files_and_skips_other_detector(tmp_path: Path) 
     )
     assert data_result.findings
     assert all(finding.rule_id.startswith("excel.") for finding in data_result.findings)
+
+
+def test_basic_scan_scans_only_selected_panels_and_returns_original_paths(tmp_path: Path) -> None:
+    repeated = np.arange(80 * 100, dtype=np.uint8).reshape(80, 100)
+    first = np.full((120, 240), 255, dtype=np.uint8)
+    second = np.full((120, 240), 230, dtype=np.uint8)
+    first[20:100, 10:110] = repeated
+    second[20:100, 120:220] = repeated
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    assert cv2.imwrite(str(first_path), first)
+    assert cv2.imwrite(str(second_path), second)
+    selections = (
+        PanelSelection(str(first_path), 1, 1, 10, 20, 100, 80),
+        PanelSelection(str(second_path), 1, 2, 120, 20, 100, 80),
+    )
+
+    result = BasicScanService(
+        panel_splitting_enabled=True,
+        panel_selections=selections,
+        scan_mode=ScanMode.IMAGE,
+    ).scan([first_path, second_path])
+
+    exact = next(
+        finding for finding in result.findings if finding.rule_id == "image.panel.pixel_exact"
+    )
+    assert exact.title == "子面板像素完全一致"
+    assert {location.source_path for location in exact.locations} == {
+        str(first_path.resolve()),
+        str(second_path.resolve()),
+    }
+    assert all("子面板" in (location.coordinate or "") for location in exact.locations)
+    assert exact.details["first_region_x"] in {10, 120}
+    assert exact.details["first_region_width"] == 100
+    assert result.performance is not None
+    assert "image.panel_materialize" in {stage.stage_id for stage in result.performance.stages}
+
+
+def test_panel_scan_reports_corrupt_image_without_aborting_valid_panels(tmp_path: Path) -> None:
+    valid = tmp_path / "valid.png"
+    corrupt = tmp_path / "corrupt.png"
+    assert cv2.imwrite(str(valid), np.arange(32 * 32, dtype=np.uint8).reshape(32, 32))
+    corrupt.write_bytes(b"not-an-image")
+    selections = (
+        PanelSelection(str(valid), 1, 1, 0, 0, 32, 32),
+        PanelSelection(str(corrupt), 1, 1, 0, 0, 1, 1),
+    )
+
+    result = BasicScanService(
+        panel_splitting_enabled=True,
+        panel_selections=selections,
+        scan_mode=ScanMode.IMAGE,
+    ).scan([valid, corrupt])
+
+    assert len(result.issues) == 1
+    assert result.issues[0].source_path == str(corrupt.resolve())
+    assert "复合图拆分无法读取图片" in result.issues[0].message
 
 
 def test_basic_scan_uses_configured_digit_fragment_length(tmp_path: Path) -> None:

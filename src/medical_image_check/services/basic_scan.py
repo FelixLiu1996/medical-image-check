@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -16,6 +17,7 @@ from medical_image_check.domain.excel_settings import (
 )
 from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import ScanResult
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.engines.excel_exact import (
     SUPPORTED_SPREADSHEET_EXTENSIONS,
     ExactExcelDuplicateDetector,
@@ -30,10 +32,16 @@ from medical_image_check.infrastructure.performance import (
     profile_stage,
     record_items,
 )
+from medical_image_check.services.panel_splitting import (
+    PanelMaterialization,
+    remap_panel_findings,
+    remap_panel_issues,
+)
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
-    "generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4"
+    "generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+"
+    "panel-split-1+excel-advanced-4"
 )
 
 
@@ -116,9 +124,13 @@ class BasicScanService:
         excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS,
         excel_medium_run_length: int = DEFAULT_EXCEL_MEDIUM_RUN_LENGTH,
         excel_high_run_length: int = DEFAULT_EXCEL_HIGH_RUN_LENGTH,
+        panel_splitting_enabled: bool = False,
+        panel_selections: tuple[PanelSelection, ...] = (),
         scan_mode: ScanMode | str = ScanMode.ALL,
     ) -> None:
         self.scan_mode = ScanMode(scan_mode)
+        self._panel_splitting_enabled = panel_splitting_enabled
+        self._panel_selections = panel_selections
         self._image_detector = (
             ImageDuplicateDetector(western_single_band_enabled, image_analysis_mode)
             if self.scan_mode != ScanMode.DATA
@@ -197,12 +209,36 @@ class BasicScanService:
         image_findings, image_issues = ([], [])
         if self.scan_mode != ScanMode.DATA:
             assert self._image_detector is not None
-            image_findings, image_issues = self._image_detector.scan(
-                images,
-                mark_complete,
-                scan_control.checkpoint,
-                profiler,
-            )
+            if self._panel_splitting_enabled:
+                if not self._panel_selections:
+                    raise ValueError("已启用复合图拆分，请先预览并确认子面板。")
+                if not any(selection.selected for selection in self._panel_selections):
+                    raise ValueError("没有勾选要扫描的子面板。")
+                with ExitStack() as materialization_stack:
+                    with profile_stage(profiler, "image.panel_materialize"):
+                        materialization = materialization_stack.enter_context(
+                            PanelMaterialization(images, self._panel_selections)
+                        )
+                    record_items(profiler, "image.panel_materialize", len(materialization.paths))
+                    if not materialization.paths and not materialization.issues:
+                        raise ValueError("未生成可扫描的子面板，请重新预览拆分结果。")
+                    total = len(materialization.paths) + len(spreadsheets)
+                    image_findings, image_issues = self._image_detector.scan(
+                        materialization.paths,
+                        mark_complete,
+                        scan_control.checkpoint,
+                        profiler,
+                    )
+                    image_findings = remap_panel_findings(image_findings, materialization)
+                    image_issues = remap_panel_issues(image_issues, materialization)
+                    image_issues.extend(materialization.issues)
+            else:
+                image_findings, image_issues = self._image_detector.scan(
+                    images,
+                    mark_complete,
+                    scan_control.checkpoint,
+                    profiler,
+                )
         scan_control.checkpoint()
         if progress and images and self.scan_mode == ScanMode.ALL:
             progress(completed, total, "图片候选验证完成，正在处理表格")

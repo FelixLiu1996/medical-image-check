@@ -77,6 +77,7 @@ def test_excel_report_contains_overview_findings_issues_and_sources(tmp_path: Pa
     assert overview["Excel 自定义相对容差"] == "0.0%"
     assert overview["Excel 运算目标"] == "0, 1, 10, 100, 1000"
     assert overview["Excel 连续关系风险阈值"] == "中风险 3；高风险 4"
+    assert overview["复合图拆分"] == "关闭"
     workbook.close()
     assert source.read_bytes() == b"unchanged-source"
 

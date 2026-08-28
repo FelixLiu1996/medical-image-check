@@ -72,7 +72,7 @@
 - 功能分支命名统一为 `<agent-name>/<feature-name>`，例如 `codex/lightweight-review-feedback`。
 - 增加 performance schema 1，记录扫描总时长、有效运行时长、暂停时长以及图片/Excel 分阶段耗时和处理项数。
 - 增加 NVIDIA 与 OpenCV CUDA 只读探测；探测失败自动保留 CPU 路径，不阻断任何核心查重。
-- 项目清单升级为 schema 7 并兼容 schema 1–6；最近扫描的性能画像可随项目保存，旧项目保持可读。
+- 项目清单升级为 schema 8 并兼容 schema 1–7；最近扫描的性能画像和复合图子面板选择可随项目保存，旧项目保持可读。
 - GUI 增加 JSON 性能诊断导出，诊断不包含原始数据、输入路径、查重位置或结构化证据。
 - 通过 ADR-0005 确认先画像再选择 GPU 后端，以 RTX 3080 Ti 为首个参考环境而非最低配置。
 - Excel 读取增加最近列标题、标题行和只读公式引用元数据；序列按表格区块分段，明确编号段不进入数值规则。
@@ -91,7 +91,8 @@
 - 轻量反馈已合入并推送 `main`（`2d9ea57`），开发分支和 main CI 均通过。
 - Dot blot 已升级为局部背景弱斑点候选、任意方向阵列、3–8 个近连续局部子集和逐斑点局部图像联合验证；同一页对只保留最佳结果，相同排列但局部内容不相容的合成负例已被拒绝。
 - 增加本地 Dot blot 逐对标签清单评测器，输出 TP/FP/FN/TN 等指标并校验同一来源组不跨数据集；不下载、复制或提交真实图片。
-- 当前开发版本为 `0.1.0a15`，扫描算法为 `generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
+- 当前开发版本为 `0.1.0a16`，扫描算法为 `generic-image-local-1+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+panel-split-1+excel-advanced-4`；当前计算后端仍固定为 CPU，尚未启用 CUDA。
+- 开发分支 `codex/composite-panel-splitting` 已实现批次级可选复合图拆分：规则视觉岛自动候选、扫描前原图框选预览、默认全选/逐项取消、普通单图整页回退、schema 8 项目恢复，以及临时无损裁剪到原图路径/页码/证据坐标的回映。第一版尚不能拖拽调整、重新切割、合并或命名。
 - Excel 工程优化本地回归已完成：正常 `rescaled` 公式列不再进入重点异常队列，默认重点候选由约 1,800 条全部线索收敛为 50 条，且三类已知阳性仍在重点队列。该结果是工作量控制，不代表 50 条均为真实异常。
 - 最新 Excel 阶段 Windows/Linux CI 和 Windows portable 已通过；打包程序三报告冒烟、许可证收集、ZIP 组装和工件上传均成功。
 - Dot blot `dot-blot-2` 提交 `9cd400c` 已推送开发分支，CI 与 Windows portable 均成功；用户已确认快进合入 `main`。
@@ -127,7 +128,7 @@
 ## 明确未开始
 
 - Windows 安装程序和正式 Release
-- 通用单图 Copy-Move、可手工调整的多面板拆分、荧光实验组语义和病理连续切片语义
+- 通用单图 Copy-Move、复合图手工调整边界/重新切割/合并/命名、荧光实验组语义和病理连续切片语义
 - Excel 自动识别实验组和手动框选扫描区域
 - 历史库和完整项目包
 - NVIDIA CUDA 计算后端及 CPU/GPU 一致性验证
@@ -135,7 +136,7 @@
 ## 最新验证
 
 - Windows 本地 Python 3.12.10；Ruff 检查与格式检查通过，`pip check` 通过。
-- `QT_QPA_PLATFORM=offscreen` 下 pytest 123 项全部通过；包含通用图片逐对评测、窄条带行缩放/翻转和 Western 低覆盖细长局部证据过滤回归，并保留既有 Dot blot、Excel 和 GUI 测试。
+- `QT_QPA_PLATFORM=offscreen` 下 pytest 132 项全部通过；新增复合图识别、单图回退、多页 TIFF 映射、部分勾选、损坏文件隔离、schema 7 迁移、临时裁剪清理、原图坐标回映和预览弹窗回归，并保留既有通用图片、Western、Dot blot、Excel 和 GUI 测试。
 - Qt offscreen 启动通过
 - `pyside6-deploy --dry-run` 配置解析通过
 - 第三方许可证收集脚本本地通过

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRectF, Qt, QThread, QTimer, Signal, Slot
@@ -20,6 +21,8 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -29,9 +32,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -54,6 +59,7 @@ from medical_image_check.domain.models import (
     RiskLevel,
     ScanResult,
 )
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.domain.project import Project
 from medical_image_check.domain.review import (
     carry_forward_review_status,
@@ -77,6 +83,7 @@ from medical_image_check.services.basic_scan import (
 from medical_image_check.services.excel_report import ExcelReportExporter
 from medical_image_check.services.feedback_export import FeedbackExporter
 from medical_image_check.services.html_report import HtmlReportExporter
+from medical_image_check.services.panel_splitting import detect_panel_selections
 from medical_image_check.services.pdf_report import PdfReportExporter
 from medical_image_check.services.performance_export import PerformanceExporter
 from medical_image_check.services.report_common import REVIEW_LABELS
@@ -331,6 +338,8 @@ class ScanWorker(QObject):
         excel_operation_targets: tuple[str, ...],
         excel_medium_run_length: int,
         excel_high_run_length: int,
+        panel_splitting_enabled: bool,
+        panel_selections: tuple[PanelSelection, ...],
         scan_mode: ScanMode,
     ) -> None:
         super().__init__()
@@ -343,6 +352,8 @@ class ScanWorker(QObject):
         self._excel_operation_targets = excel_operation_targets
         self._excel_medium_run_length = excel_medium_run_length
         self._excel_high_run_length = excel_high_run_length
+        self._panel_splitting_enabled = panel_splitting_enabled
+        self._panel_selections = panel_selections
         self._scan_mode = scan_mode
         self.control = ScanControl()
 
@@ -360,6 +371,8 @@ class ScanWorker(QObject):
                 excel_operation_targets=self._excel_operation_targets,
                 excel_medium_run_length=self._excel_medium_run_length,
                 excel_high_run_length=self._excel_high_run_length,
+                panel_splitting_enabled=self._panel_splitting_enabled,
+                panel_selections=self._panel_selections,
                 scan_mode=self._scan_mode,
             ).scan(self._sources, self.progress.emit, self.control)
         except ScanCancelled:
@@ -369,6 +382,114 @@ class ScanWorker(QObject):
             self.failed.emit(str(exc))
             return
         self.finished.emit(result)
+
+
+class PanelPreviewDialog(QDialog):
+    def __init__(
+        self,
+        selections: tuple[PanelSelection, ...],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("确认复合图拆分结果")
+        self.resize(980, 680)
+        self._selections = selections
+        layout = QVBoxLayout(self)
+        instructions = QLabel(
+            "自动拆分仅生成候选区域，不修改原图。请取消勾选不需要扫描的区域；"
+            "第一版暂不支持拖拽边界或合并区域。"
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+        body = QSplitter(Qt.Orientation.Horizontal)
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        self._summary = QLabel()
+        left_layout.addWidget(self._summary)
+        self._list = QListWidget()
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        for selection in selections:
+            item = QListWidgetItem(selection.display_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if selection.selected else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, selection.stable_key)
+            item.setToolTip(
+                f"原图坐标：x={selection.x}, y={selection.y}, "
+                f"宽={selection.width}, 高={selection.height}"
+            )
+            self._list.addItem(item)
+        left_layout.addWidget(self._list, 1)
+        selection_actions = QHBoxLayout()
+        select_all = QPushButton("全选")
+        clear_all = QPushButton("全部取消")
+        select_all.clicked.connect(lambda: self._set_all_checked(True))
+        clear_all.clicked.connect(lambda: self._set_all_checked(False))
+        selection_actions.addWidget(select_all)
+        selection_actions.addWidget(clear_all)
+        selection_actions.addStretch(1)
+        left_layout.addLayout(selection_actions)
+        body.addWidget(left)
+        self._preview = ImageEvidenceView()
+        self._preview.set_crop_to_region(True)
+        body.addWidget(self._preview)
+        body.setSizes([380, 600])
+        layout.addWidget(body, 1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确认选择")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self._accept_if_selected)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._list.currentRowChanged.connect(self._show_panel)
+        self._list.itemChanged.connect(lambda _item: self._update_summary())
+        self._update_summary()
+        if self._list.count():
+            self._list.setCurrentRow(0)
+
+    def selected_panels(self) -> tuple[PanelSelection, ...]:
+        checked = {
+            str(self._list.item(index).data(Qt.ItemDataRole.UserRole))
+            for index in range(self._list.count())
+            if self._list.item(index).checkState() == Qt.CheckState.Checked
+        }
+        return tuple(
+            replace(selection, selected=selection.stable_key in checked)
+            for selection in self._selections
+        )
+
+    @Slot(int)
+    def _show_panel(self, row: int) -> None:
+        if row < 0:
+            self._preview.set_evidence(None)
+            return
+        selection = self._selections[row]
+        self._preview.set_evidence(
+            selection.source_path,
+            (selection.x, selection.y, selection.width, selection.height),
+            selection.page,
+        )
+
+    def _set_all_checked(self, checked: bool) -> None:
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        for index in range(self._list.count()):
+            self._list.item(index).setCheckState(state)
+
+    def _update_summary(self) -> None:
+        checked = sum(
+            self._list.item(index).checkState() == Qt.CheckState.Checked
+            for index in range(self._list.count())
+        )
+        self._summary.setText(f"已选择 {checked} / {self._list.count()} 个候选子面板")
+
+    def _accept_if_selected(self) -> None:
+        if not any(selection.selected for selection in self.selected_panels()):
+            QMessageBox.information(self, "没有选择", "请至少勾选一个要扫描的子面板。")
+            return
+        self.accept()
 
 
 class MainWindow(QMainWindow):
@@ -477,6 +598,8 @@ class MainWindow(QMainWindow):
         self._performance_export_button.clicked.connect(self._export_performance_dialog)
         self._digit_run_spin.valueChanged.connect(self._scan_settings_changed)
         self._western_single_band_check.toggled.connect(self._western_settings_changed)
+        self._panel_splitting_check.toggled.connect(self._panel_splitting_settings_changed)
+        self._panel_preview_button.clicked.connect(lambda: self._prepare_panel_selections(True))
         self._image_analysis_mode_combo.currentIndexChanged.connect(
             self._image_analysis_mode_changed
         )
@@ -648,22 +771,38 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._input_group)
 
         self._image_settings_group = QGroupBox("图片检测设置")
-        image_settings = QHBoxLayout(self._image_settings_group)
-        image_settings.addWidget(QLabel("内容类型："))
+        image_settings = QVBoxLayout(self._image_settings_group)
+        image_settings_first_row = QHBoxLayout()
+        image_settings_first_row.addWidget(QLabel("内容类型："))
         self._image_analysis_mode_combo = QComboBox()
         for mode, label in IMAGE_ANALYSIS_MODE_LABELS.items():
             self._image_analysis_mode_combo.addItem(label, mode.value)
         self._image_analysis_mode_combo.setToolTip(
             "自动模式会先判断图像类型再运行专项算法；已知类型时可直接指定，减少串类误报。"
         )
-        image_settings.addWidget(self._image_analysis_mode_combo)
+        image_settings_first_row.addWidget(self._image_analysis_mode_combo)
         self._western_single_band_check = QCheckBox("检测 Western blot 单条带相似")
         self._western_single_band_check.setToolTip(
             "默认关闭；单条带自然相似较常见，启用后只生成低风险人工复核候选。"
         )
-        image_settings.addWidget(self._western_single_band_check)
-        image_settings.addWidget(QLabel("通用重复检测始终运行；专项算法按所选类型运行。"))
-        image_settings.addStretch(1)
+        image_settings_first_row.addWidget(self._western_single_band_check)
+        image_settings_first_row.addWidget(QLabel("通用重复检测始终运行；专项算法按所选类型运行。"))
+        image_settings_first_row.addStretch(1)
+        image_settings.addLayout(image_settings_first_row)
+        image_settings_second_row = QHBoxLayout()
+        self._panel_splitting_check = QCheckBox("拆分复合图后扫描")
+        self._panel_splitting_check.setToolTip(
+            "统一应用于本次图片输入；自动拆分后可预览并取消勾选不需要的子面板。"
+        )
+        image_settings_second_row.addWidget(self._panel_splitting_check)
+        self._panel_preview_button = QPushButton("预览拆分")
+        self._panel_preview_button.setToolTip("重新识别所有输入图片并确认要扫描的子面板")
+        image_settings_second_row.addWidget(self._panel_preview_button)
+        image_settings_second_row.addWidget(
+            QLabel("启用后统一拆分本批图片；预览中可逐个取消不需要的子面板。")
+        )
+        image_settings_second_row.addStretch(1)
+        image_settings.addLayout(image_settings_second_row)
         layout.addWidget(self._image_settings_group)
 
         self._excel_settings_group = QGroupBox("数据检测设置")
@@ -979,6 +1118,7 @@ class MainWindow(QMainWindow):
         controls = (
             self._digit_run_spin,
             self._western_single_band_check,
+            self._panel_splitting_check,
             self._image_analysis_mode_combo,
             self._excel_relative_tolerance_spin,
             self._excel_absolute_tolerance_edit,
@@ -990,6 +1130,7 @@ class MainWindow(QMainWindow):
             control.blockSignals(True)
         self._digit_run_spin.setValue(project.minimum_digit_run)
         self._western_single_band_check.setChecked(project.western_single_band_enabled)
+        self._panel_splitting_check.setChecked(project.panel_splitting_enabled)
         mode_index = self._image_analysis_mode_combo.findData(project.image_analysis_mode)
         self._image_analysis_mode_combo.setCurrentIndex(max(0, mode_index))
         self._excel_relative_tolerance_spin.setValue(
@@ -1311,6 +1452,11 @@ class MainWindow(QMainWindow):
         if self._project is None:
             self.create_project("未命名项目")
             self._project = self._project.with_sources(sources)
+        if self._scan_mode == ScanMode.IMAGE and self._project.panel_splitting_enabled:
+            selections_current = self._panel_selections_match_sources(sources)
+            needs_preview = not self._project.panel_selections or not selections_current
+            if needs_preview and not self._prepare_panel_selections(not selections_current):
+                return
 
         self._render_result(None)
         self._result_before_scan = self._current_result
@@ -1336,6 +1482,8 @@ class MainWindow(QMainWindow):
             self._project.excel_operation_targets,
             self._project.excel_medium_run_length,
             self._project.excel_high_run_length,
+            self._project.panel_splitting_enabled,
+            self._project.panel_selections,
             self._scan_mode,
         )
         self._worker.moveToThread(self._thread)
@@ -1680,6 +1828,79 @@ class MainWindow(QMainWindow):
         label = self._image_analysis_mode_combo.itemText(index)
         self._status.setText(f"图片内容类型已改为“{label}”，原扫描结果已失效。")
 
+    @Slot(bool)
+    def _panel_splitting_settings_changed(self, enabled: bool) -> None:
+        if self._project is None or self._project.panel_splitting_enabled == enabled:
+            return
+        self._project = self._project.with_panel_splitting_enabled(enabled)
+        self._current_result = None
+        self._render_result(None)
+        self._mark_dirty()
+        state = "启用" if enabled else "关闭"
+        suffix = "；开始扫描前需要预览确认" if enabled else ""
+        self._status.setText(f"复合图拆分已{state}{suffix}，原扫描结果已失效。")
+
+    def _prepare_panel_selections(self, force: bool) -> bool:
+        if self._project is None:
+            QMessageBox.information(self, "没有项目", "请先添加图片。")
+            return False
+        if not self._project.panel_splitting_enabled:
+            QMessageBox.information(self, "尚未启用", "请先勾选“拆分复合图后扫描”。")
+            return False
+        if self._project.panel_selections and not force:
+            return True
+        sources = [self._sources.item(index).text() for index in range(self._sources.count())]
+        image_files = BasicScanService(scan_mode=ScanMode.IMAGE).collect_supported_files(sources)
+        if not image_files:
+            QMessageBox.information(self, "没有图片", "当前输入中没有可拆分的图片。")
+            return False
+        progress = QProgressDialog("正在识别复合图子面板…", "取消", 0, len(image_files), self)
+        progress.setWindowTitle("复合图拆分")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+
+        def update_progress(done: int, total: int, name: str) -> bool:
+            progress.setMaximum(total)
+            progress.setValue(done)
+            progress.setLabelText(f"正在识别：{name}")
+            QApplication.processEvents()
+            return not progress.wasCanceled()
+
+        try:
+            selections = detect_panel_selections(image_files, update_progress)
+        except (OSError, ValueError) as exc:
+            progress.close()
+            QMessageBox.warning(self, "拆分失败", str(exc))
+            return False
+        progress.close()
+        if progress.wasCanceled():
+            self._status.setText("已取消复合图拆分，原有选择未改变。")
+            return False
+        dialog = PanelPreviewDialog(selections, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._status.setText("未确认拆分结果，原有选择未改变。")
+            return False
+        confirmed = dialog.selected_panels()
+        self._project = self._project.with_panel_selections(confirmed)
+        self._current_result = None
+        self._render_result(None)
+        self._mark_dirty()
+        selected_count = sum(selection.selected for selection in confirmed)
+        self._status.setText(
+            f"已确认 {selected_count} / {len(confirmed)} 个子面板；扫描只处理勾选区域。"
+        )
+        return True
+
+    def _panel_selections_match_sources(self, sources: list[str]) -> bool:
+        if self._project is None or not self._project.panel_selections:
+            return False
+        current_files = BasicScanService(scan_mode=ScanMode.IMAGE).collect_supported_files(sources)
+        current_paths = {str(path.resolve()) for path in current_files}
+        selected_paths = {
+            selection.normalized_source_path for selection in self._project.panel_selections
+        }
+        return current_paths == selected_paths
+
     @Slot()
     def _excel_settings_changed(self) -> None:
         if self._project is None:
@@ -1771,6 +1992,14 @@ class MainWindow(QMainWindow):
         self._digit_run_spin.setEnabled(self._project is not None and not scan_running)
         self._western_single_band_check.setEnabled(self._project is not None and not scan_running)
         self._image_analysis_mode_combo.setEnabled(self._project is not None and not scan_running)
+        panel_controls_enabled = (
+            self._project is not None
+            and self._project.panel_splitting_enabled
+            and self._scan_mode == ScanMode.IMAGE
+            and not scan_running
+        )
+        self._panel_splitting_check.setEnabled(self._project is not None and not scan_running)
+        self._panel_preview_button.setEnabled(panel_controls_enabled)
         for control in (
             self._excel_relative_tolerance_spin,
             self._excel_absolute_tolerance_edit,

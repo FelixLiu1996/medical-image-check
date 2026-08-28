@@ -11,6 +11,7 @@ from medical_image_check.domain.models import (
     ScanIssue,
     ScanResult,
 )
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.domain.project import Project
 from medical_image_check.services.html_report import HtmlReportExporter
 from medical_image_check.services.pdf_report import PdfReportExporter
@@ -62,7 +63,18 @@ def _report_fixture(tmp_path: Path) -> tuple[ScanResult, Project, Path, Path]:
         algorithm_version="test-algorithm-1",
         completed_at="2026-08-25T00:00:00+00:00",
     )
-    project = Project.create("三种报告测试").with_sources([first, second]).with_scan_result(result)
+    project = (
+        Project.create("三种报告测试")
+        .with_sources([first, second])
+        .with_panel_splitting_enabled(True)
+        .with_panel_selections(
+            (
+                PanelSelection(str(first), 1, 1, 0, 0, 180, 120),
+                PanelSelection(str(second), 1, 1, 0, 0, 180, 120, False),
+            )
+        )
+        .with_scan_result(result)
+    )
     return result, project, first, second
 
 
@@ -82,6 +94,7 @@ def test_html_report_is_single_file_with_search_and_embedded_evidence(tmp_path: 
     assert 'id="attention"' in content
     assert "filterRows" in content
     assert "图片内容类型 自动识别（推荐）" in content
+    assert "复合图拆分 启用（已选 1/2）" in content
     assert "Excel 相对容差 0.0%" in content
     assert "连续风险阈值 3/4" in content
     assert "https://" not in content
