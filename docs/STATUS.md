@@ -98,6 +98,7 @@
 - 已在 `codex/image-benchmark-v1` 建立通用医学图片逐对本地评测器，支持同图/跨图区域、按类型运行、Western 单条带开关、来源组隔离及分类型指标；真实图片和清单继续只存在于 Git 忽略目录。
 - 第一版本地 validation 整理出 39 对：26 对阳性、13 对阴性，覆盖 Western blot、免疫荧光、普通病理和细胞明场；Dot blot 暂缓。去除可见彩框并优先换用未画框原图后，`western-blot-1` 基线为 11 TP、1 FP、15 FN、12 TN；`western-blot-2` 定向修正后为 16 TP、0 FP、10 FN、13 TN。该结果只用于同集回归，不是正式准确率。
 - 医学人员已逐对确认首轮 Western blot 的 5 个漏报均为重复，唯一误报（阴性论文第 15 页 G/H 的 beta-actin）为不重复；`western-blot-2` 在这 11 对 Western validation 上为 7 TP、0 FP、0 FN、4 TN。此前确认的 Casp11/NEDD4 目标条带及其 beta-actin 对仍被正确排除。
+- 新增 `docs/WECHAT_PAPER_DATASET_FEASIBILITY.md`，记录利用公众号/PubPeer 公开标注定位合法干净论文图片、生成正例和默认负例的拟议数据链路及首篇 Figcheck 试点交接；尚未修改产品范围或实现抓取/训练工具。
 
 ## 下一步
 
@@ -123,6 +124,7 @@
 - HTML 最多内嵌前 120 条图像证据，PDF 最多内嵌前 40 条；全部结果仍保留在结果表和 Excel 报告。
 - PDF 已在 macOS 嵌入中文字体并完成渲染/文本层验证；Windows 系统字体发现、不同阅读器和打印仍待 portable/实机验收。
 - Windows 免安装包已通过 Actions 构建与冒烟，仍需干净 Windows 10/11 实机人工验收。
+- 公众号论文训练样本链路尚未完成首篇端到端验证；当前没有把真实公众号正文、标注图片、论文附件或本地清单提交到仓库。
 
 ## 明确未开始
 
