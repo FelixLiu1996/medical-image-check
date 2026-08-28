@@ -1,4 +1,6 @@
-# Medical Image Check 开发约定
+# Repository Guidelines
+
+本文件是 Medical Image Check 仓库的开发与协作约定。
 
 ## 当前阶段
 
@@ -68,8 +70,17 @@
 
 ## Git 和提交
 
+- 所有代码、测试和文档修改都必须在开发分支上进行，禁止直接在 `main` 分支开发或提交。开始修改前，先从最新的 `main` 创建开发分支。
 - 功能分支统一使用 `<agent-name>/<feature-name>`，例如 `codex/lightweight-review-feedback`。
 - `<agent-name>` 使用创建分支的 Agent 名称；`<feature-name>` 使用简短、清晰的小写英文功能名，单词之间用连字符连接。一个分支只承载一个可独立 Review 的主题。
+- 建议按以下方式创建分支：
+
+  ```bash
+  git switch main
+  git pull --ff-only
+  git switch -c codex/<feature-name>
+  ```
+
 - 推荐 Conventional Commits：`feat:`、`fix:`、`docs:`、`test:`、`refactor:`、`build:`、`chore:`。
 - 采用语义化版本。
 - 不使用破坏性 Git 命令处理不属于当前任务的修改。
