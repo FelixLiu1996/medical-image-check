@@ -259,8 +259,8 @@ def _overview_table(result: ScanResult, project: Project | None, styles) -> Tabl
         [
             "Western 单条带",
             "启用" if project and project.western_single_band_enabled else "关闭",
-            "",
-            "",
+            "复合图拆分",
+            _panel_splitting_text(project),
         ],
     ]
     formatted = [[Paragraph(escape(str(cell)), styles["Small"]) for cell in row] for row in rows]
@@ -280,6 +280,13 @@ def _overview_table(result: ScanResult, project: Project | None, styles) -> Tabl
         )
     )
     return table
+
+
+def _panel_splitting_text(project: Project | None) -> str:
+    if project is None or not project.panel_splitting_enabled:
+        return "关闭"
+    selected = sum(selection.selected for selection in project.panel_selections)
+    return f"启用（已选 {selected}/{len(project.panel_selections)}）"
 
 
 def _findings_table(result: ScanResult, styles) -> LongTable:

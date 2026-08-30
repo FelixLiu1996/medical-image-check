@@ -53,6 +53,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - Dot blot/斑点阵列专项检测，联合排列与逐斑点局部图像识别弱斑点、局部子集、裁剪、缩放、旋转、镜像和对比度变化；
 - 荧光图 DAPI/FITC/RFP/Cy5 等通道识别、同视野配准、单通道与 Merge 成分关系，以及同通道高一致复用候选；
 - 图片内容类型支持自动识别或手动指定通用、Western、Dot blot、荧光和病理，减少专项串类误报；
+- 复合图拆分可按批次启用，扫描前预览全部候选并逐项勾选，查重证据回映到原图路径、页码和区域；
 - 普通病理图光密度组织掩膜、多尺度局部区域匹配、倍率识别、染色准入，以及不同倍率正常关系分类；
 - xlsx、xlsm、xls、csv 数值读取；
 - Excel 完整数值和数值行重复检测；
@@ -68,7 +69,7 @@ GitHub 仓库：https://github.com/FelixLiu1996/medical-image-check
 - Windows/Linux GitHub CI、静态检查和自动化测试。
 - `pyside6-deploy`/Nuitka Windows standalone 免安装包工作流。
 
-当前整体感知、局部几何、Western blot、Dot blot、荧光、病理、Excel 近似和关系结果均需人工复核。Western blot 复杂多面板拆分、任意区域擦除/拼接，Dot blot 多行阵列/不规则排布，荧光实验组语义，病理连续切片语义，通用单图 Copy-Move，Excel 自动识别/手动框选扫描、历史库和可恢复任务断点仍在后续里程碑；统计相似不会自动判定重复。
+当前整体感知、局部几何、复合图候选拆分、Western blot、Dot blot、荧光、病理、Excel 近似和关系结果均需人工复核。复合图无明显分隔、嵌套面板及手工改边界/合并，Western blot 任意区域擦除/拼接，Dot blot 多行阵列/不规则排布，荧光实验组语义，病理连续切片语义，通用单图 Copy-Move，Excel 自动识别/手动框选扫描、历史库和可恢复任务断点仍在后续里程碑；统计相似不会自动判定重复。
 
 ## 本地开发
 

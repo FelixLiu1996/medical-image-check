@@ -15,8 +15,9 @@ from medical_image_check.domain.excel_settings import (
 )
 from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.models import ScanResult
+from medical_image_check.domain.panels import PanelSelection
 
-PROJECT_SCHEMA_VERSION = 7
+PROJECT_SCHEMA_VERSION = 8
 DEFAULT_MINIMUM_DIGIT_RUN = 4
 
 
@@ -34,6 +35,8 @@ class Project:
     minimum_digit_run: int = DEFAULT_MINIMUM_DIGIT_RUN
     western_single_band_enabled: bool = False
     image_analysis_mode: str = ImageAnalysisMode.AUTO.value
+    panel_splitting_enabled: bool = False
+    panel_selections: tuple[PanelSelection, ...] = ()
     excel_custom_relative_tolerance_percent: float = 0.0
     excel_absolute_tolerance: str = DEFAULT_EXCEL_ABSOLUTE_TOLERANCE
     excel_operation_targets: tuple[str, ...] = DEFAULT_EXCEL_OPERATION_TARGETS
@@ -66,6 +69,7 @@ class Project:
         return replace(
             self,
             source_paths=normalized,
+            panel_selections=(),
             last_scan_result=None,
             updated_at=_now_iso(),
         )
@@ -78,6 +82,7 @@ class Project:
         return replace(
             self,
             source_paths=ordered,
+            panel_selections=(),
             last_scan_result=None,
             updated_at=_now_iso(),
         )
@@ -114,6 +119,31 @@ class Project:
         return replace(
             self,
             image_analysis_mode=normalized,
+            last_scan_result=None,
+            updated_at=_now_iso(),
+        )
+
+    def with_panel_splitting_enabled(self, enabled: bool) -> Project:
+        if enabled == self.panel_splitting_enabled:
+            return self
+        return replace(
+            self,
+            panel_splitting_enabled=enabled,
+            panel_selections=(),
+            last_scan_result=None,
+            updated_at=_now_iso(),
+        )
+
+    def with_panel_selections(self, selections: tuple[PanelSelection, ...]) -> Project:
+        normalized = tuple(
+            replace(selection, source_path=selection.normalized_source_path)
+            for selection in selections
+        )
+        if normalized == self.panel_selections:
+            return self
+        return replace(
+            self,
+            panel_selections=normalized,
             last_scan_result=None,
             updated_at=_now_iso(),
         )

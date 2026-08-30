@@ -107,12 +107,20 @@ def _project_parameter_text(project: Project | None) -> str:
     return (
         "扫描参数："
         f"图片内容类型 {IMAGE_ANALYSIS_MODE_LABELS[ImageAnalysisMode(project.image_analysis_mode)]}；"
+        f"复合图拆分 {_panel_splitting_text(project)}；"
         f"数字片段 {project.minimum_digit_run} 位；"
         f"Excel 相对容差 {project.excel_custom_relative_tolerance_percent}%；"
         f"绝对容差 {project.excel_absolute_tolerance}；"
         f"目标 {', '.join(project.excel_operation_targets)}；"
         f"连续风险阈值 {project.excel_medium_run_length}/{project.excel_high_run_length}"
     )
+
+
+def _panel_splitting_text(project: Project) -> str:
+    if not project.panel_splitting_enabled:
+        return "关闭"
+    selected = sum(selection.selected for selection in project.panel_selections)
+    return f"启用（已选 {selected}/{len(project.panel_selections)}）"
 
 
 def _finding_row(finding) -> str:
