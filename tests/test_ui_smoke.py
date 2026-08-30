@@ -20,7 +20,7 @@ from medical_image_check.domain.performance import (
     StageTiming,
 )
 from medical_image_check.services.basic_scan import ScanMode
-from medical_image_check.ui.main_window import MainWindow
+from medical_image_check.ui.main_window import MainWindow, _evidence_summary_text
 
 
 def test_main_window_can_be_created_offscreen() -> None:
@@ -267,9 +267,36 @@ def test_main_window_displays_local_geometric_evidence(tmp_path: Path) -> None:
     assert window._second_evidence._crop_to_region is True
     window._copy_evidence_button.click()
     assert "几何内点：20" in QApplication.clipboard().text()
-
     window.close()
     app.processEvents()
+
+
+def test_small_region_content_evidence_explains_requested_review() -> None:
+    finding = Finding(
+        finding_id="small-content-evidence",
+        rule_id="image.small_region.content_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="小区域内容高度一致",
+        description="小尺寸区域细节一致",
+        locations=(EvidenceLocation("first.png"), EvidenceLocation("second.png")),
+        confidence=0.9,
+        details={
+            "verification_method": "dense_structure",
+            "gray_correlation": 0.88,
+            "highpass_correlation": 0.91,
+            "gradient_correlation": 0.86,
+            "transform_second_to_first": "flip_horizontal",
+            "offset_x_at_128": 2,
+            "offset_y_at_128": -1,
+        },
+    )
+
+    summary = _evidence_summary_text(finding)
+
+    assert "密集结构复核" in summary
+    assert "高频纹理 91.0%" in summary
+    assert "归一化位移 (2, -1)" in summary
 
 
 def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> None:

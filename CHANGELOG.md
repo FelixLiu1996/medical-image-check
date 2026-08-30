@@ -79,8 +79,10 @@
 - 增加 Dot blot 本地标签清单评测器，输出逐对 TP/FP/FN/TN、precision、recall 和 specificity，并阻止同一来源组跨训练/验证/测试集合。
 - 增加 Dot blot 弱斑点、3/8 局部子集、旋转/缩放/对比度、暗底划痕和相同排列不同内容的合成回归。
 - 增加通用医学图片逐对本地评测器，支持整图/局部区域、同图 Copy-Move、按图片类型运行、来源组 split 隔离和分类型指标；真实样例与清单不进入仓库。
+- 完成 42 个公众号案例的本地数据链路与两轮医学反馈闭环：返工后的 7 个 Figure/Panel 定位全部确认，1 个增强条带关系完成医学判断，最终固定 25 条正例和 9 条负例的 validation；真实文章、图片、反馈和交互包不进入仓库。
 - 建立第一版 Western blot、免疫荧光、普通病理和细胞明场本地 validation 基线，明确彩色标记框必须从计分区域剔除，Dot blot 暂缓。
 - Western 单条带敏感模式增加窄条带行回退，比较缩放/翻转后的整行结构和横向强度轮廓；明确 Western 模式下过滤覆盖过小且过度细长的通用局部匹配。
+- 增加 `generic-image-local-2`：抑制白底科学图表和组合版式伪相似，并以有界候选、密集结构及 SIFT 仿射验证补充小区域内容复用；GUI 展示验证方法、结构相关、变换或几何内点。42 案例的 34 对同集开发回归由 13 TP/5 FP/12 FN/4 TN 变为 25 TP/0 FP/0 FN/9 TN，该结果不是独立准确率。
 
 ### Changed
 
@@ -100,6 +102,7 @@
 - 软件版本升级为 `0.1.0a13`；Excel 扫描算法升级为 `excel-advanced-4`，项目 schema 保持 7。
 - 软件版本升级为 `0.1.0a14`；Dot blot 扫描算法升级为 `dot-blot-2`，项目 schema 保持 7。
 - 软件版本升级为 `0.1.0a15`；Western blot 扫描算法升级为 `western-blot-2`，项目 schema 保持 7。
+- 通用图片扫描算法升级为 `generic-image-local-2`，完整算法版本为 `generic-image-local-2+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+excel-advanced-4`；项目 schema 保持 7。
 - Dot blot 使用局部背景响应补充弱斑点候选，支持任意方向近连续子集，并联合逐斑点局部图像、强度、面积和形状验证；每个图片页对只保留最佳专项证据。
 - GUI 和 Excel“图像证据”增加 Dot blot 局部图像、最低单斑点、缩放、旋转和镜像证据。
 - 病理自动准入增加染色色度要求，灰度 Western/Dot blot 不再默认进入病理专项；用户显式选择病理时仍可强制运行。

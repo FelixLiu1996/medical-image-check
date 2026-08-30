@@ -1899,6 +1899,26 @@ def _evidence_summary_text(finding: Finding) -> str:
             f"估算尺度比 {details.get('estimated_scale_ratio', '-')}；"
             f"变换 {details.get('transform_second_to_first', '-')}。"
         )
+    if finding.rule_id == "image.small_region.content_reuse":
+        method = details.get("verification_method")
+        if method == "dense_structure":
+            return (
+                "小区域细节证据：密集结构复核；"
+                f"灰度结构 {_as_percent(details.get('gray_correlation'))}；"
+                f"高频纹理 {_as_percent(details.get('highpass_correlation'))}；"
+                f"边缘结构 {_as_percent(details.get('gradient_correlation'))}；"
+                f"变换 {details.get('transform_second_to_first', '-')}；"
+                f"归一化位移 ({details.get('offset_x_at_128', '-')}, "
+                f"{details.get('offset_y_at_128', '-')})。"
+            )
+        return (
+            "小区域细节证据：局部特征几何复核；"
+            f"匹配点 {details.get('matched_keypoints', '-')}；"
+            f"几何内点 {details.get('inlier_count', '-')}；"
+            f"内点比例 {_as_percent(details.get('inlier_ratio'))}；"
+            f"中位重投影误差 {details.get('median_reprojection_error', '-')}；"
+            f"变换 {details.get('transform_second_to_first', '-')}。"
+        )
     if finding.rule_id != "image.local.geometric":
         return f"{finding.title}：{finding.description}"
     return (

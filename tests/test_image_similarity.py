@@ -5,7 +5,13 @@ import cv2
 import numpy as np
 
 from medical_image_check.domain.image_settings import ImageAnalysisMode
-from medical_image_check.engines.image_similarity import ImageDuplicateDetector
+from medical_image_check.engines.image_similarity import (
+    ImageDuplicateDetector,
+    _is_layout_dominant_pair,
+    _small_content_match,
+    _small_structural_match,
+)
+from medical_image_check.infrastructure.images import extract_image_features_from_pages
 
 
 def _synthetic_image() -> np.ndarray:
@@ -34,6 +40,40 @@ def _synthetic_local_image(seed: int = 20260825) -> np.ndarray:
         (245, 245, 245),
         5,
     )
+    return image
+
+
+def _synthetic_scientific_layout(seed: int) -> np.ndarray:
+    random = np.random.default_rng(seed)
+    image = np.full((420, 620, 3), 255, dtype=np.uint8)
+    for panel, (left, top) in enumerate(((25, 35), (320, 35), (25, 225), (320, 225))):
+        cv2.putText(
+            image,
+            chr(ord("A") + panel),
+            (left, top - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (20, 20, 20),
+            2,
+        )
+        cv2.line(image, (left + 30, top + 125), (left + 260, top + 125), (20, 20, 20), 2)
+        cv2.line(image, (left + 30, top + 10), (left + 30, top + 125), (20, 20, 20), 2)
+        cv2.putText(
+            image,
+            "Control  Treatment  Time",
+            (left + 36, top + 150),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            (30, 30, 30),
+            1,
+        )
+        points = []
+        for index in range(6):
+            x = left + 40 + index * 40
+            y = top + 105 - int(random.integers(5, 85))
+            points.append((x, y))
+            cv2.circle(image, (x, y), 4, (80, 70, 170), -1)
+        cv2.polylines(image, [np.asarray(points, dtype=np.int32)], False, (80, 70, 170), 2)
     return image
 
 
@@ -145,6 +185,117 @@ def test_detector_does_not_report_unrelated_local_images(tmp_path: Path) -> None
 
     assert issues == []
     assert not any(item.rule_id == "image.local.geometric" for item in findings)
+
+
+def test_detector_suppresses_white_background_scientific_layout_matches(
+    tmp_path: Path,
+) -> None:
+    first_image = _synthetic_scientific_layout(11)
+    second_image = _synthetic_scientific_layout(22)
+    first = tmp_path / "layout-a.png"
+    second = tmp_path / "layout-b.png"
+    assert cv2.imwrite(str(first), first_image)
+    assert cv2.imwrite(str(second), second_image)
+    first_feature = extract_image_features_from_pages(first, (first_image,))[0]
+    second_feature = extract_image_features_from_pages(second, (second_image,))[0]
+
+    findings, issues = ImageDuplicateDetector(analysis_mode=ImageAnalysisMode.GENERIC).scan(
+        [first, second]
+    )
+
+    assert issues == []
+    assert _is_layout_dominant_pair(first_feature, second_feature) is True
+    assert not any(
+        item.rule_id
+        in {
+            "image.global.perceptual",
+            "image.local.geometric",
+            "image.small_region.content_reuse",
+        }
+        for item in findings
+    )
+
+
+def test_small_structural_match_finds_shifted_low_texture_strip() -> None:
+    x = np.linspace(-1.0, 1.0, 112, dtype=np.float32)
+    y = np.linspace(-1.0, 1.0, 44, dtype=np.float32)[:, None]
+    strip = 205 - 65 * np.exp(-((x / 0.42) ** 2 + (y / 0.19) ** 2))
+    strip += 8 * np.sin(np.arange(112, dtype=np.float32) / 7)[None, :]
+    first = np.clip(strip, 0, 255).astype(np.uint8)
+    second = cv2.warpAffine(
+        cv2.convertScaleAbs(first, alpha=0.78, beta=35),
+        np.asarray([[1.0, 0.0, 4.0], [0.0, 1.0, 2.0]], dtype=np.float32),
+        (112, 44),
+        borderMode=cv2.BORDER_REFLECT,
+    )
+
+    match = _small_structural_match(first, second)
+
+    assert match is not None
+    assert match.details["verification_method"] == "dense_structure"
+    assert match.details["highpass_correlation"] >= 0.65
+    assert match.details["gradient_correlation"] >= 0.65
+
+
+def test_small_content_match_finds_mirrored_microscopy_crop() -> None:
+    image = _synthetic_local_image(913)[120:240, 170:330]
+    first_image = image[10:105, 12:145]
+    second_image = cv2.resize(
+        cv2.flip(image, 1),
+        (176, 126),
+        interpolation=cv2.INTER_AREA,
+    )[8:118, 8:168]
+    first = extract_image_features_from_pages(Path("first.png"), (first_image,))[0]
+    second = extract_image_features_from_pages(Path("second.png"), (second_image,))[0]
+
+    match = _small_content_match(0, 1, first, second, {})
+
+    assert match is not None
+    assert match.details["verification_method"] == "sift_geometry"
+    assert match.details["inlier_count"] >= 6
+
+
+def test_small_content_match_rejects_unrelated_regions() -> None:
+    first_random = np.random.default_rng(101)
+    second_random = np.random.default_rng(202)
+    first_image = first_random.integers(10, 180, size=(80, 120, 3), dtype=np.uint8)
+    second_image = second_random.integers(10, 180, size=(80, 120, 3), dtype=np.uint8)
+    cv2.circle(first_image, (30, 30), 14, (220, 80, 40), -1)
+    cv2.rectangle(second_image, (75, 45), (108, 70), (40, 220, 180), -1)
+    first = extract_image_features_from_pages(Path("first.png"), (first_image,))[0]
+    second = extract_image_features_from_pages(Path("second.png"), (second_image,))[0]
+
+    assert _small_content_match(0, 1, first, second, {}) is None
+
+
+def test_small_content_fallback_rejects_many_unrelated_strips(tmp_path: Path) -> None:
+    paths: list[Path] = []
+    for index in range(24):
+        random = np.random.default_rng(7000 + index)
+        height = int(random.integers(24, 58))
+        width = int(random.integers(65, 176))
+        image = random.normal(178, 22, size=(height, width)).astype(np.float32)
+        image = cv2.GaussianBlur(image, (0, 0), float(random.uniform(0.6, 1.8)))
+        for _ in range(int(random.integers(1, 4))):
+            x = int(random.integers(3, width - 20))
+            y = int(random.integers(3, height - 5))
+            band_width = int(random.integers(12, min(65, width - x)))
+            band_height = int(random.integers(2, min(8, height - y)))
+            cv2.rectangle(
+                image,
+                (x, y),
+                (x + band_width, y + band_height),
+                float(random.integers(35, 125)),
+                -1,
+            )
+        path = tmp_path / f"negative-strip-{index:02d}.png"
+        assert cv2.imwrite(str(path), np.clip(image, 0, 255).astype(np.uint8))
+        paths.append(path)
+
+    findings, issues = ImageDuplicateDetector(analysis_mode=ImageAnalysisMode.GENERIC).scan(paths)
+
+    assert issues == []
+    assert not any(item.rule_id == "image.small_region.content_reuse" for item in findings)
 
 
 def test_detector_finds_partial_overlap_between_two_crops(tmp_path: Path) -> None:
