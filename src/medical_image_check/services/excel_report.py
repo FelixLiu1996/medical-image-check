@@ -217,6 +217,7 @@ class ExcelReportExporter:
                 in {
                     "western_blot",
                     "dot_blot",
+                    "local_pattern",
                     "fluorescence",
                     "pathology",
                 }

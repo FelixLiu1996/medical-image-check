@@ -131,6 +131,40 @@ def test_excel_report_contains_structured_dot_blot_evidence(tmp_path: Path) -> N
     workbook.close()
 
 
+def test_excel_report_labels_auto_dot_layout_evidence_as_local_pattern(
+    tmp_path: Path,
+) -> None:
+    finding = Finding(
+        finding_id="local-pattern-1",
+        rule_id="image.dot_blot.spot_array_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="局部重复结构疑似复用",
+        description="自动模式通用结构证据。",
+        locations=(
+            EvidenceLocation(str(tmp_path / "first.png")),
+            EvidenceLocation(str(tmp_path / "second.png")),
+        ),
+        details={
+            "evidence_kind": "local_pattern",
+            "technical_detector": "dot_blot_layout",
+            "medical_modality_claimed": False,
+            "matched_spot_count": 4,
+            "layout_similarity": 0.98,
+        },
+    )
+
+    output = ExcelReportExporter().export(
+        ScanResult(2, 2, 0, (finding,)), tmp_path / "local-pattern-report.xlsx"
+    )
+    workbook = load_workbook(output, read_only=True)
+
+    assert workbook["图像证据"]["A2"].value == "local-pattern-1"
+    assert workbook["图像证据"]["R2"].value == "局部结构"
+    assert workbook["查重结果"]["E2"].value == "局部重复结构疑似复用"
+    workbook.close()
+
+
 def test_excel_report_contains_structured_western_blot_evidence(tmp_path: Path) -> None:
     first = tmp_path / "first.png"
     second = tmp_path / "second.png"

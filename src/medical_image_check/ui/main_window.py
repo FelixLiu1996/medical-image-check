@@ -75,6 +75,7 @@ from medical_image_check.engines.image_exact import SUPPORTED_IMAGE_EXTENSIONS
 from medical_image_check.infrastructure.project_store import ProjectStore
 from medical_image_check.infrastructure.spreadsheets import read_spreadsheet_preview
 from medical_image_check.services.basic_scan import (
+    ALGORITHM_VERSION,
     BasicScanService,
     ScanCancelled,
     ScanControl,
@@ -1092,9 +1093,15 @@ class MainWindow(QMainWindow):
         self._refresh_source_list()
         self._render_result(project.last_scan_result)
         result_count = len(project.last_scan_result.findings) if project.last_scan_result else 0
+        old_algorithm_note = ""
+        if (
+            project.last_scan_result is not None
+            and project.last_scan_result.algorithm_version != ALGORITHM_VERSION
+        ):
+            old_algorithm_note = " 结果来自旧算法版本，建议重新扫描。"
         self._status.setText(
             f"已打开项目：{project.name}。恢复 {len(project.source_paths)} 个输入路径"
-            f"和 {result_count} 条结果。"
+            f"和 {result_count} 条结果。{old_algorithm_note}"
         )
         self._update_project_state()
         return project
@@ -2080,6 +2087,17 @@ def _read_evidence_image(source_path: str | None, page: int) -> QImage:
 
 def _evidence_summary_text(finding: Finding) -> str:
     details = finding.details
+    if details.get("evidence_kind") == "local_pattern":
+        return (
+            f"局部结构证据：匹配特征 {details.get('matched_spot_count', '-')} 个；"
+            f"排列相似度 {_as_percent(details.get('layout_similarity'))}；"
+            f"形态轮廓 {_as_percent(details.get('profile_similarity'))}；"
+            f"局部图像 {_as_percent(details.get('appearance_similarity'))}；"
+            f"缩放比 {details.get('scale_second_to_first', '-')}；"
+            f"旋转 {details.get('rotation_degrees_second_to_first', '-')}°；"
+            f"镜像 {'是' if details.get('mirrored') else '否'}。"
+            "自动模式未据此判断具体实验类型。"
+        )
     if finding.rule_id.startswith("image.dot_blot."):
         return (
             f"Dot blot 证据：匹配斑点 {details.get('matched_spot_count', '-')} 个；"

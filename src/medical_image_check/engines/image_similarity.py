@@ -4,7 +4,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from itertools import combinations
 from pathlib import Path
@@ -193,6 +193,10 @@ class ImageDuplicateDetector:
                 source_duplicate_pairs,
                 checkpoint,
             )
+            if self.analysis_mode == ImageAnalysisMode.AUTO:
+                dot_blot_findings = [
+                    _as_auto_local_pattern_finding(finding) for finding in dot_blot_findings
+                ]
             findings.extend(dot_blot_findings)
         record_items(profiler, "image.dot_blot_verification", len(dot_blot_findings))
         with profile_stage(profiler, "image.fluorescence_verification"):
@@ -1386,6 +1390,24 @@ def _small_candidate_pairs(
         counts[first] += 1
         counts[second] += 1
     return selected
+
+
+def _as_auto_local_pattern_finding(finding: Finding) -> Finding:
+    """Keep a layout detector's evidence without claiming a medical modality."""
+
+    details = dict(finding.details)
+    details["evidence_kind"] = "local_pattern"
+    details["technical_detector"] = "dot_blot_layout"
+    details["medical_modality_claimed"] = False
+    return replace(
+        finding,
+        title="局部重复结构疑似复用",
+        description=(
+            "局部特征的排列和形态高度一致；自动模式仅将其作为通用结构证据，"
+            "不据此判断图片属于 Dot blot。请结合实际实验类型复核。"
+        ),
+        details=details,
+    )
 
 
 def _candidate_pairs(features: list[ImageFeature]) -> set[tuple[int, int]]:

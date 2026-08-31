@@ -40,7 +40,7 @@ from medical_image_check.services.panel_splitting import (
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
-    "generic-image-local-2+western-blot-2+dot-blot-2+fluorescence-1+pathology-2+"
+    "generic-image-local-2+western-blot-2+dot-blot-3+fluorescence-1+pathology-2+"
     "panel-split-1+excel-advanced-4"
 )
 

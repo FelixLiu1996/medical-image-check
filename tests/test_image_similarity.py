@@ -353,6 +353,10 @@ def test_detector_finds_dot_blot_layout_after_crop_scale_and_contrast(tmp_path: 
     assert dot.details["matched_spot_count"] >= 3
     assert dot.details["layout_similarity"] >= 0.8
     assert dot.details["profile_similarity"] >= 0.65
+    assert dot.title == "局部重复结构疑似复用"
+    assert dot.details["evidence_kind"] == "local_pattern"
+    assert dot.details["technical_detector"] == "dot_blot_layout"
+    assert dot.details["medical_modality_claimed"] is False
     assert not any(item.rule_id.startswith("image.pathology.") for item in findings)
 
 

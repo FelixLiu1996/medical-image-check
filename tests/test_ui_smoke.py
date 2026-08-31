@@ -202,6 +202,7 @@ def test_main_window_marks_filters_persists_and_exports_feedback(tmp_path: Path)
 
     restored = MainWindow()
     restored.open_project(project_path)
+    assert "结果来自旧算法版本，建议重新扫描" in restored._status.text()
     assert restored._current_result is not None
     assert restored._current_result.findings[0].review_status == ReviewStatus.CONFIRMED
 
@@ -328,6 +329,36 @@ def test_small_region_content_evidence_explains_requested_review() -> None:
     assert "密集结构复核" in summary
     assert "高频纹理 91.0%" in summary
     assert "归一化位移 (2, -1)" in summary
+
+
+def test_auto_local_pattern_evidence_does_not_claim_dot_blot_modality() -> None:
+    finding = Finding(
+        finding_id="auto-local-pattern",
+        rule_id="image.dot_blot.spot_array_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="局部重复结构疑似复用",
+        description="自动模式通用结构证据",
+        locations=(EvidenceLocation("first.png"), EvidenceLocation("second.png")),
+        confidence=0.9,
+        details={
+            "evidence_kind": "local_pattern",
+            "matched_spot_count": 5,
+            "layout_similarity": 0.88,
+            "profile_similarity": 0.91,
+            "appearance_similarity": 0.86,
+            "scale_second_to_first": 1.1,
+            "rotation_degrees_second_to_first": -2.0,
+            "mirrored": False,
+        },
+    )
+
+    summary = _evidence_summary_text(finding)
+
+    assert "局部结构证据" in summary
+    assert "匹配特征 5 个" in summary
+    assert "自动模式未据此判断具体实验类型" in summary
+    assert "Dot blot 证据" not in summary
 
 
 def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> None:
