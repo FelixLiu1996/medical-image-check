@@ -72,6 +72,8 @@ def test_dot_blot_matches_three_spot_crop_inside_eight_spot_row(tmp_path: Path) 
 
     assert issues == []
     dot = next(item for item in findings if item.rule_id == DOT_BLOT_RULE_ID)
+    assert dot.title == "Dot blot 斑点阵列疑似复用"
+    assert dot.details["evidence_kind"] == "dot_blot"
     assert dot.details["matched_spot_count"] == 3
     assert 3 in {dot.details["first_spot_count"], dot.details["second_spot_count"]}
     assert 8 in {dot.details["first_spot_count"], dot.details["second_spot_count"]}

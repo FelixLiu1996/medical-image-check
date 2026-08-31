@@ -12,6 +12,7 @@ THUMBNAIL_SIZE = 64
 LOCAL_FEATURE_MAX_DIMENSION = 1600
 LOCAL_FEATURE_LIMIT = 1200
 LOCAL_FEATURE_GRID_SIZE = 4
+DETAIL_IMAGE_MAX_PIXELS = 25_000
 TRANSFORMS = (
     "identity",
     "rotate_90",
@@ -44,6 +45,9 @@ class ImageFeature:
     fingerprints: tuple[TransformFingerprint, ...]
     local_keypoints: NDArray[np.float32]
     local_descriptors: NDArray[np.uint8]
+    layout_background_fraction: float
+    mean_colorfulness: float
+    detail_image: NDArray[np.uint8] | None
 
     @property
     def identity_fingerprint(self) -> TransformFingerprint:
@@ -81,6 +85,7 @@ def extract_image_features_from_pages(
         )
         normalized = _normalize_thumbnail(thumbnail_u8)
         local_keypoints, local_descriptors = _extract_local_features(gray)
+        layout_background_fraction, mean_colorfulness = _layout_statistics(canonical, gray)
         fingerprints = tuple(
             TransformFingerprint(
                 transform=transform,
@@ -103,6 +108,13 @@ def extract_image_features_from_pages(
                 fingerprints=fingerprints,
                 local_keypoints=local_keypoints,
                 local_descriptors=local_descriptors,
+                layout_background_fraction=layout_background_fraction,
+                mean_colorfulness=mean_colorfulness,
+                detail_image=(
+                    np.ascontiguousarray(gray)
+                    if gray.size <= DETAIL_IMAGE_MAX_PIXELS and min(gray.shape) >= 16
+                    else None
+                ),
             )
         )
     return tuple(features)
@@ -194,6 +206,17 @@ def _pixel_digest(image: NDArray) -> str:
     digest.update(str(tuple(image.shape)).encode("ascii"))
     digest.update(image.tobytes(order="C"))
     return digest.hexdigest()
+
+
+def _layout_statistics(
+    canonical: NDArray,
+    gray: NDArray[np.uint8],
+) -> tuple[float, float]:
+    bgr = canonical[:, :, :3]
+    values = bgr.astype(np.float32)
+    chroma = np.max(values, axis=2) - np.min(values, axis=2)
+    background = (gray >= 238) & (chroma <= 25)
+    return float(np.mean(background)), float(np.mean(chroma))
 
 
 def _normalize_thumbnail(image: NDArray[np.uint8]) -> NDArray[np.float32]:

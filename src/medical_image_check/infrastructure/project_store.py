@@ -21,6 +21,7 @@ from medical_image_check.domain.models import (
     ScanIssue,
     ScanResult,
 )
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.domain.performance import (
     GpuDevice,
     RuntimeEnvironment,
@@ -67,6 +68,13 @@ class ProjectStore:
             ).value
         except ValueError as exc:
             raise ValueError("项目文件中的 image_analysis_mode 无效") from exc
+        panel_splitting_enabled = payload.get("panel_splitting_enabled", False)
+        if not isinstance(panel_splitting_enabled, bool):
+            raise ValueError("项目文件中的 panel_splitting_enabled 必须为布尔值")
+        panel_payload = payload.get("panel_selections", [])
+        if not isinstance(panel_payload, list):
+            raise ValueError("项目文件中的 panel_selections 无效")
+        panel_selections = tuple(_panel_selection_from_dict(item) for item in panel_payload)
         excel_payload = payload.get("excel_analysis_settings", {})
         if not isinstance(excel_payload, dict):
             raise ValueError("项目文件中的 excel_analysis_settings 无效")
@@ -90,6 +98,8 @@ class ProjectStore:
             minimum_digit_run=minimum_digit_run,
             western_single_band_enabled=western_single_band_enabled,
             image_analysis_mode=image_analysis_mode,
+            panel_splitting_enabled=panel_splitting_enabled,
+            panel_selections=panel_selections,
             excel_custom_relative_tolerance_percent=float(
                 excel_settings.custom_relative_tolerance_percent
             ),
@@ -116,6 +126,20 @@ def _project_to_dict(project: Project) -> dict[str, object]:
         "minimum_digit_run": project.minimum_digit_run,
         "western_single_band_enabled": project.western_single_band_enabled,
         "image_analysis_mode": project.image_analysis_mode,
+        "panel_splitting_enabled": project.panel_splitting_enabled,
+        "panel_selections": [
+            {
+                "source_path": selection.source_path,
+                "page": selection.page,
+                "panel_index": selection.panel_index,
+                "x": selection.x,
+                "y": selection.y,
+                "width": selection.width,
+                "height": selection.height,
+                "selected": selection.selected,
+            }
+            for selection in project.panel_selections
+        ],
         "excel_analysis_settings": {
             "custom_relative_tolerance_percent": (project.excel_custom_relative_tolerance_percent),
             "absolute_tolerance": project.excel_absolute_tolerance,
@@ -128,6 +152,27 @@ def _project_to_dict(project: Project) -> dict[str, object]:
         ),
         "report_paths": list(project.report_paths),
     }
+
+
+def _panel_selection_from_dict(payload: object) -> PanelSelection:
+    if not isinstance(payload, dict):
+        raise ValueError("项目文件中的子面板选择无效")
+    try:
+        selected = payload.get("selected", True)
+        if not isinstance(selected, bool):
+            raise ValueError("selected 必须为布尔值")
+        return PanelSelection(
+            source_path=str(payload["source_path"]),
+            page=int(payload["page"]),
+            panel_index=int(payload["panel_index"]),
+            x=int(payload["x"]),
+            y=int(payload["y"]),
+            width=int(payload["width"]),
+            height=int(payload["height"]),
+            selected=selected,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("项目文件中的子面板选择无效") from exc
 
 
 def _scan_result_to_dict(result: ScanResult) -> dict[str, object]:

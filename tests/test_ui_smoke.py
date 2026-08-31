@@ -14,13 +14,18 @@ from medical_image_check.domain.models import (
     RiskLevel,
     ScanResult,
 )
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.domain.performance import (
     RuntimeEnvironment,
     ScanPerformance,
     StageTiming,
 )
 from medical_image_check.services.basic_scan import ScanMode
-from medical_image_check.ui.main_window import MainWindow
+from medical_image_check.ui.main_window import (
+    MainWindow,
+    PanelPreviewDialog,
+    _evidence_summary_text,
+)
 
 
 def test_main_window_can_be_created_offscreen() -> None:
@@ -78,6 +83,7 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     window._append_sources([str(source)])
     window._digit_run_spin.setValue(6)
     window._western_single_band_check.setChecked(True)
+    window._panel_splitting_check.setChecked(True)
     dot_blot_index = window._image_analysis_mode_combo.findData("dot_blot")
     window._image_analysis_mode_combo.setCurrentIndex(dot_blot_index)
     window._excel_relative_tolerance_spin.setValue(0.25)
@@ -102,6 +108,9 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
     assert restored._digit_run_spin.value() == 6
     assert restored._project.western_single_band_enabled is True
     assert restored._western_single_band_check.isChecked()
+    assert restored._project.panel_splitting_enabled is True
+    assert restored._panel_splitting_check.isChecked()
+    assert restored._panel_preview_button.isEnabled()
     assert restored._project.image_analysis_mode == "dot_blot"
     assert restored._image_analysis_mode_combo.currentData() == "dot_blot"
     assert restored._project.excel_custom_relative_tolerance_percent == 0.25
@@ -118,6 +127,28 @@ def test_main_window_can_save_restore_project_and_export_report(tmp_path: Path) 
 
     window.close()
     restored.close()
+    app.processEvents()
+
+
+def test_panel_preview_dialog_allows_partial_selection(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    source = tmp_path / "composite.png"
+    image = QImage(400, 200, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    assert image.save(str(source))
+    selections = (
+        PanelSelection(str(source), 1, 1, 0, 0, 200, 200),
+        PanelSelection(str(source), 1, 2, 200, 0, 200, 200),
+    )
+    dialog = PanelPreviewDialog(selections)
+
+    dialog._list.item(1).setCheckState(Qt.CheckState.Unchecked)
+    selected = dialog.selected_panels()
+
+    assert selected[0].selected is True
+    assert selected[1].selected is False
+    assert "1 / 2" in dialog._summary.text()
+    dialog.close()
     app.processEvents()
 
 
@@ -171,6 +202,7 @@ def test_main_window_marks_filters_persists_and_exports_feedback(tmp_path: Path)
 
     restored = MainWindow()
     restored.open_project(project_path)
+    assert "结果来自旧算法版本，建议重新扫描" in restored._status.text()
     assert restored._current_result is not None
     assert restored._current_result.findings[0].review_status == ReviewStatus.CONFIRMED
 
@@ -267,9 +299,66 @@ def test_main_window_displays_local_geometric_evidence(tmp_path: Path) -> None:
     assert window._second_evidence._crop_to_region is True
     window._copy_evidence_button.click()
     assert "几何内点：20" in QApplication.clipboard().text()
-
     window.close()
     app.processEvents()
+
+
+def test_small_region_content_evidence_explains_requested_review() -> None:
+    finding = Finding(
+        finding_id="small-content-evidence",
+        rule_id="image.small_region.content_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="小区域内容高度一致",
+        description="小尺寸区域细节一致",
+        locations=(EvidenceLocation("first.png"), EvidenceLocation("second.png")),
+        confidence=0.9,
+        details={
+            "verification_method": "dense_structure",
+            "gray_correlation": 0.88,
+            "highpass_correlation": 0.91,
+            "gradient_correlation": 0.86,
+            "transform_second_to_first": "flip_horizontal",
+            "offset_x_at_128": 2,
+            "offset_y_at_128": -1,
+        },
+    )
+
+    summary = _evidence_summary_text(finding)
+
+    assert "密集结构复核" in summary
+    assert "高频纹理 91.0%" in summary
+    assert "归一化位移 (2, -1)" in summary
+
+
+def test_auto_local_pattern_evidence_does_not_claim_dot_blot_modality() -> None:
+    finding = Finding(
+        finding_id="auto-local-pattern",
+        rule_id="image.dot_blot.spot_array_reuse",
+        finding_type=FindingType.SUSPECTED_REUSE,
+        risk=RiskLevel.MEDIUM,
+        title="局部重复结构疑似复用",
+        description="自动模式通用结构证据",
+        locations=(EvidenceLocation("first.png"), EvidenceLocation("second.png")),
+        confidence=0.9,
+        details={
+            "evidence_kind": "local_pattern",
+            "matched_spot_count": 5,
+            "layout_similarity": 0.88,
+            "profile_similarity": 0.91,
+            "appearance_similarity": 0.86,
+            "scale_second_to_first": 1.1,
+            "rotation_degrees_second_to_first": -2.0,
+            "mirrored": False,
+        },
+    )
+
+    summary = _evidence_summary_text(finding)
+
+    assert "局部结构证据" in summary
+    assert "匹配特征 5 个" in summary
+    assert "自动模式未据此判断具体实验类型" in summary
+    assert "Dot blot 证据" not in summary
 
 
 def test_main_window_displays_excel_digit_fragment_evidence(tmp_path: Path) -> None:

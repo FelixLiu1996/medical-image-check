@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-- `Project` 使用 `schema_version = 7`，包含 UUID、名称、时间、源路径、图片内容类型、连续数字片段最短位数、Western blot 单条带开关、Excel 自定义相对/绝对容差、运算目标、连续风险阈值、最近一次扫描结果和 Excel/HTML/PDF 报告路径。
+- `Project` 使用 `schema_version = 8`，包含 UUID、名称、时间、源路径、图片内容类型、复合图拆分开关及子面板选择、连续数字片段最短位数、Western blot 单条带开关、Excel 自定义相对/绝对容差、运算目标、连续风险阈值、最近一次扫描结果和 Excel/HTML/PDF 报告路径。
 - `ProjectStore` 使用 UTF-8 JSON 和临时文件替换方式原子保存，不修改源数据。
 - `Finding`、`EvidenceLocation`、`ScanIssue` 和 `ScanResult` 作为 UI 与引擎之间的稳定对象。
 - Finding ID 根据规则与位置生成确定性指纹。
@@ -12,14 +12,16 @@
 - 局部图像结果在 `Finding.details` 中记录两侧匹配矩形、覆盖率、关键点/内点统计、重投影误差、几何模型、尺度和旋转，供项目恢复、报告和证据 UI 共用。
 - Western blot 结果记录两侧面板框、条带框、极性、翻转/旋转、条带结构、排列几何、背景纹理和掩膜重叠证据。
 - Dot blot 结果记录两侧实际匹配框、检出/匹配斑点数与索引、归一化排列误差、排列/轮廓/局部图像相似度、最低单斑点相似度，以及裁剪、缩放、旋转、镜像和对比度变换参数。
+- 自动模式复用斑点排列检测器但不判断医学类型时，记录 `evidence_kind=local_pattern`、内部 `technical_detector` 和 `medical_modality_claimed=false`；显式 Dot blot 模式仍记录 `evidence_kind=dot_blot`。
 - 荧光结果记录正常/疑似关系、通道角色、实际匹配通道、两侧区域、结构、前景掩膜、互信息、配准位移和变换。
 - 病理结果记录正常/疑似关系、两侧组织区域、倍率、估算尺度比、组织占比、结构、组织掩膜、指纹距离和变换。
-- 版本 1–6 项目清单会在内存中迁移为版本 7；缺失的图片内容类型默认使用 `auto`，其他缺失结果、报告、片段设置、单条带开关和 Excel 高级参数使用相应默认值，旧扫描的性能画像保持为空，下一次保存写为版本 7。
+- `PanelSelection` 保存原图绝对路径、TIFF 页码、稳定子面板序号、`x/y/width/height` 原图坐标和勾选状态；不保存临时裁剪路径或像素副本。
+- 版本 1–7 项目清单会在内存中迁移为版本 8；缺失的图片内容类型默认使用 `auto`，复合图拆分默认关闭且选择为空，其他缺失结果、报告、片段设置、单条带开关和 Excel 高级参数使用相应默认值，旧扫描的性能画像保持为空，下一次保存写为版本 8。
 - performance schema 1 记录 CPU/GPU 运行环境、实际后端、加速器状态、墙钟/有效/暂停时间和稳定阶段 ID 的耗时、调用次数及处理项数。画像不记录源路径或结果证据；JSON 诊断另记录软件/算法版本和扫描数量统计。
 - `Finding.details` 支持递归 JSON 证据；Excel 片段/近似结果保存逐单元格完整值，序列、区域、运算和统计关系保存逐位置配对值、关系结果、拟合或汇总参数。
-- Excel `Finding.details.attention_tier` 使用 `primary/secondary/normal` 表示重点候选、次要线索和正常关系；同一列关系的等价规则使用 `relation_group_primary`、`related_rules` 关联。它们复用 schema 7 的递归证据，不改变项目格式。读取阶段的公式文本只存在于内存，不写入项目、报告证据或反馈清单。
+- Excel `Finding.details.attention_tier` 使用 `primary/secondary/normal` 表示重点候选、次要线索和正常关系；同一列关系的等价规则使用 `relation_group_primary`、`related_rules` 关联。它们复用 schema 8 的递归证据，不再改变项目格式。读取阶段的公式文本只存在于内存，不写入项目、报告证据或反馈清单。
 
-输入路径、图片内容类型、连续数字片段最短位数、Western blot 单条带开关或任一 Excel 高级参数变化会使最近扫描结果失效，防止导出与当前输入/参数不一致的旧结果。图片内容类型取 `auto/generic/western_blot/dot_blot/fluorescence/pathology` 之一。当前 `.mic-project.json` 仍是开发阶段清单格式，不等同于 PRD 中最终的可移植项目包，也尚未缓存图片特征。
+输入路径、图片内容类型、复合图拆分开关或选择、连续数字片段最短位数、Western blot 单条带开关或任一 Excel 高级参数变化会使最近扫描结果失效，防止导出与当前输入/参数不一致的旧结果。图片内容类型取 `auto/generic/western_blot/dot_blot/fluorescence/pathology` 之一。当前 `.mic-project.json` 仍是开发阶段清单格式，不等同于 PRD 中最终的可移植项目包，也尚未缓存图片特征。
 
 扫描暂停/取消状态当前只存在于进程内，不写入项目清单。取消后的本次部分特征和部分结果全部丢弃，上一次完整 `ScanResult` 保持不变；崩溃恢复和跨进程任务断点尚未实现。
 

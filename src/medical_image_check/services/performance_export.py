@@ -20,6 +20,7 @@ STAGE_LABELS = {
     "image.exact_verification": "验证图片文件与像素重复",
     "image.perceptual_verification": "验证图片整体近似",
     "image.local_geometric_verification": "验证图片局部几何重叠",
+    "image.small_content_verification": "验证小区域细节复用",
     "image.dot_blot_verification": "验证 Dot blot 候选",
     "image.fluorescence_verification": "验证荧光图候选",
     "image.pathology_verification": "验证病理图候选",

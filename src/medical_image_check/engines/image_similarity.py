@@ -4,7 +4,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from itertools import combinations
 from pathlib import Path
@@ -56,6 +56,7 @@ class ImageDuplicateDetector:
     pixel_rule_id = "image.pixel.sha256"
     perceptual_rule_id = "image.global.perceptual"
     local_rule_id = "image.local.geometric"
+    small_content_rule_id = "image.small_region.content_reuse"
 
     def __init__(
         self,
@@ -168,12 +169,34 @@ class ImageDuplicateDetector:
             local_findings = self._local_findings(features, exact_pairs, checkpoint)
             findings.extend(local_findings)
         record_items(profiler, "image.local_geometric_verification", len(local_findings))
+        local_pairs = {
+            pair
+            for finding in local_findings
+            for pair in (_finding_page_pair(finding),)
+            if pair is not None
+        }
+        with profile_stage(profiler, "image.small_content_verification"):
+            small_content_findings = self._small_content_findings(
+                features,
+                exact_pairs | local_pairs,
+                checkpoint,
+            )
+            findings.extend(small_content_findings)
+        record_items(
+            profiler,
+            "image.small_content_verification",
+            len(small_content_findings),
+        )
         with profile_stage(profiler, "image.dot_blot_verification"):
             dot_blot_findings = self._dot_blot_detector.findings(
                 dot_blot_regions,
                 source_duplicate_pairs,
                 checkpoint,
             )
+            if self.analysis_mode == ImageAnalysisMode.AUTO:
+                dot_blot_findings = [
+                    _as_auto_local_pattern_finding(finding) for finding in dot_blot_findings
+                ]
             findings.extend(dot_blot_findings)
         record_items(profiler, "image.dot_blot_verification", len(dot_blot_findings))
         with profile_stage(profiler, "image.fluorescence_verification"):
@@ -220,7 +243,12 @@ class ImageDuplicateDetector:
                 for finding in findings
                 if not (
                     (
-                        finding.rule_id in {self.perceptual_rule_id, self.local_rule_id}
+                        finding.rule_id
+                        in {
+                            self.perceptual_rule_id,
+                            self.local_rule_id,
+                            self.small_content_rule_id,
+                        }
                         and _finding_page_pair(finding) in specialist_pairs
                     )
                     or _is_low_coverage_western_local(finding, self.analysis_mode)
@@ -323,6 +351,8 @@ class ImageDuplicateDetector:
             match = _best_match(first, second)
             if match is None:
                 continue
+            if _is_layout_dominant_pair(first, second):
+                continue
             matched_pairs.add(pair_key)
             transform, phash_distance, dhash_distance, similarity = match
             locations = (_location(first), _location(second))
@@ -399,6 +429,64 @@ class ImageDuplicateDetector:
             )
         return findings
 
+    def _small_content_findings(
+        self,
+        features: list[ImageFeature],
+        excluded_pairs: set[tuple[str, str]],
+        checkpoint: Callable[[], None] | None = None,
+    ) -> list[Finding]:
+        findings: list[Finding] = []
+        detail_cache: dict[tuple[int, bool], _SmallDetailFeature] = {}
+        candidates = sorted(_small_candidate_pairs(features, excluded_pairs))
+        for candidate_index, (first_index, second_index) in enumerate(candidates):
+            if checkpoint and candidate_index % 32 == 0:
+                checkpoint()
+            first = features[first_index]
+            second = features[second_index]
+            pair_key = _feature_pair_key(
+                first.source_path,
+                first.page,
+                second.source_path,
+                second.page,
+            )
+            if pair_key in excluded_pairs:
+                continue
+            if first.detail_image is None or second.detail_image is None:
+                continue
+            if _is_small_layout_dominant_pair(first, second):
+                continue
+            match = _small_content_match(
+                first_index,
+                second_index,
+                first,
+                second,
+                detail_cache,
+            )
+            if match is None:
+                continue
+            locations = (_location(first), _location(second))
+            risk = RiskLevel.MEDIUM if match.confidence >= 0.86 else RiskLevel.LOW
+            findings.append(
+                Finding(
+                    finding_id=deterministic_finding_id(
+                        self.small_content_rule_id,
+                        locations,
+                    ),
+                    rule_id=self.small_content_rule_id,
+                    finding_type=FindingType.SUSPECTED_REUSE,
+                    risk=risk,
+                    title="小区域内容高度一致",
+                    description=(
+                        "小尺寸区域经过允许翻转、轻微位移和尺度变化的细节复核，"
+                        "去背景纹理或局部特征具有一致性。"
+                    ),
+                    locations=locations,
+                    confidence=match.confidence,
+                    details=match.details,
+                )
+            )
+        return findings
+
 
 LOCAL_INDEX_DESCRIPTOR_LIMIT = 96
 LOCAL_SIGNATURE_OFFSETS = (0, 4, 8, 12, 16, 20, 24, 28)
@@ -412,6 +500,24 @@ LOCAL_MIN_INLIERS = 8
 LOCAL_MIN_INLIER_RATIO = 0.50
 WESTERN_LOCAL_MIN_COVERAGE = 0.18
 WESTERN_LOCAL_MIN_ELONGATION = 6.0
+LAYOUT_MIN_PIXELS = 30_000
+LAYOUT_MIN_DIMENSION = 96
+LAYOUT_MIN_BACKGROUND_FRACTION = 0.62
+LAYOUT_LOCAL_MIN_COVERAGE = 0.35
+SMALL_SIFT_MIN_INLIERS = 12
+SMALL_SIFT_MIN_INLIER_RATIO = 0.70
+SMALL_SIFT_MAX_MEDIAN_ERROR = 2.5
+SMALL_STRUCTURE_MIN_GRAY_CORRELATION = 0.75
+SMALL_STRUCTURE_MIN_HIGHPASS_CORRELATION = 0.65
+SMALL_STRUCTURE_MIN_GRADIENT_CORRELATION = 0.64
+SMALL_STRUCTURE_STRONG_HIGHPASS_CORRELATION = 0.90
+SMALL_STRUCTURE_SHIFT_LIMIT = 16
+SMALL_STRUCTURE_MAX_COLORFULNESS = 35.0
+SMALL_STRUCTURE_FINE_MAX_DIMENSION = 64
+SMALL_STRUCTURE_FINE_TRIGGER_HIGHPASS = 0.85
+SMALL_CANDIDATE_MIN_SHARED_HASH_KEYS = 10
+SMALL_CANDIDATE_PER_FEATURE_LIMIT = 32
+SMALL_CANDIDATE_BUCKET_LIMIT = 64
 
 
 def _is_low_coverage_western_local(
@@ -466,6 +572,18 @@ class _GeometricMatch:
     details: dict[str, str | int | float]
 
 
+@dataclass(frozen=True, slots=True)
+class _SmallDetailFeature:
+    points: NDArray[np.float32]
+    descriptors: NDArray[np.float32]
+
+
+@dataclass(frozen=True, slots=True)
+class _SmallContentMatch:
+    confidence: float
+    details: dict[str, str | int | float]
+
+
 def _looks_like_western_input(path: Path, pages: tuple[NDArray, ...]) -> bool:
     stem = path.stem.lower()
     if "western" in stem or "免疫印迹" in stem or "蛋白印迹" in stem:
@@ -475,6 +593,31 @@ def _looks_like_western_input(path: Path, pages: tuple[NDArray, ...]) -> bool:
         bgr = canonical_pixels(page)[:, :, :3].astype(np.float32)
         colorfulness.append(float(np.mean(np.max(bgr, axis=2) - np.min(bgr, axis=2))))
     return bool(colorfulness) and float(np.median(colorfulness)) <= 6.0
+
+
+def _is_layout_dominant_pair(
+    first: ImageFeature,
+    second: ImageFeature,
+    *,
+    minimum_coverage: float | None = None,
+) -> bool:
+    if min(first.width, first.height, second.width, second.height) < LAYOUT_MIN_DIMENSION:
+        return False
+    if min(first.width * first.height, second.width * second.height) < LAYOUT_MIN_PIXELS:
+        return False
+    if min(first.layout_background_fraction, second.layout_background_fraction) < (
+        LAYOUT_MIN_BACKGROUND_FRACTION
+    ):
+        return False
+    return minimum_coverage is None or minimum_coverage >= LAYOUT_LOCAL_MIN_COVERAGE
+
+
+def _is_small_layout_dominant_pair(first: ImageFeature, second: ImageFeature) -> bool:
+    return (
+        min(first.width, first.height, second.width, second.height) >= 64
+        and min(first.layout_background_fraction, second.layout_background_fraction)
+        >= LAYOUT_MIN_BACKGROUND_FRACTION
+    )
 
 
 def _finding_page_pair(finding: Finding) -> tuple[str, str] | None:
@@ -564,6 +707,12 @@ def _geometric_match(first: ImageFeature, second: ImageFeature) -> _GeometricMat
     second_coverage = second_region[2] * second_region[3] / max(second.width * second.height, 1)
     if max(first_coverage, second_coverage) < 0.08 or min(first_coverage, second_coverage) < 0.01:
         return None
+    if _is_layout_dominant_pair(
+        first,
+        second,
+        minimum_coverage=min(first_coverage, second_coverage),
+    ):
+        return None
 
     scale_x, scale_y, rotation = _transform_summary(
         estimate.matrix,
@@ -606,6 +755,454 @@ def _geometric_match(first: ImageFeature, second: ImageFeature) -> _GeometricMat
         "second_size": f"{second.width}x{second.height}",
     }
     return _GeometricMatch(confidence=round(confidence, 6), details=details)
+
+
+def _small_content_match(
+    first_index: int,
+    second_index: int,
+    first: ImageFeature,
+    second: ImageFeature,
+    cache: dict[tuple[int, bool], _SmallDetailFeature],
+) -> _SmallContentMatch | None:
+    structural = (
+        _small_structural_match(first.detail_image, second.detail_image)
+        if max(first.mean_colorfulness, second.mean_colorfulness)
+        <= SMALL_STRUCTURE_MAX_COLORFULNESS
+        else None
+    )
+    sift = _small_sift_match(first_index, second_index, first, second, cache)
+    if structural is None and sift is None:
+        return None
+    if sift is not None and (structural is None or sift.confidence >= structural.confidence):
+        return sift
+    return structural
+
+
+def _small_structural_match(
+    first: NDArray[np.uint8] | None,
+    second: NDArray[np.uint8] | None,
+) -> _SmallContentMatch | None:
+    if first is None or second is None:
+        return None
+    first_resized = cv2.resize(first, (128, 128), interpolation=cv2.INTER_CUBIC)
+    first_highpass = first_resized.astype(np.float32) - cv2.GaussianBlur(
+        first_resized.astype(np.float32),
+        (0, 0),
+        3,
+    )
+    first_gradient = _gradient_magnitude(first_resized)
+    inner = np.s_[
+        SMALL_STRUCTURE_SHIFT_LIMIT : 128 - SMALL_STRUCTURE_SHIFT_LIMIT,
+        SMALL_STRUCTURE_SHIFT_LIMIT : 128 - SMALL_STRUCTURE_SHIFT_LIMIT,
+    ]
+    first_gray_template = first_resized[inner]
+    first_highpass_template = first_highpass[inner]
+    first_gradient_template = first_gradient[inner]
+    best: tuple[float, float, float, str, int, int] | None = None
+    for transform in (
+        "identity",
+        "flip_horizontal",
+        "flip_vertical",
+        "rotate_180",
+        "rotate_90",
+        "rotate_270",
+        "transpose",
+        "anti_transpose",
+    ):
+        transformed = _small_transform(second, transform)
+        second_resized = cv2.resize(transformed, (128, 128), interpolation=cv2.INTER_CUBIC)
+        second_highpass = second_resized.astype(np.float32) - cv2.GaussianBlur(
+            second_resized.astype(np.float32),
+            (0, 0),
+            3,
+        )
+        second_gradient = _gradient_magnitude(second_resized)
+        gray_map = cv2.matchTemplate(
+            second_resized,
+            first_gray_template,
+            cv2.TM_CCOEFF_NORMED,
+        )
+        highpass_map = cv2.matchTemplate(
+            second_highpass,
+            first_highpass_template,
+            cv2.TM_CCOEFF_NORMED,
+        )
+        gradient_map = cv2.matchTemplate(
+            second_gradient,
+            first_gradient_template,
+            cv2.TM_CCOEFF_NORMED,
+        )
+        score_map = 0.20 * gray_map + 0.45 * highpass_map + 0.35 * gradient_map
+        _, _, _, best_location = cv2.minMaxLoc(score_map)
+        location_x, location_y = best_location
+        candidate = (
+            float(gray_map[location_y, location_x]),
+            float(highpass_map[location_y, location_x]),
+            float(gradient_map[location_y, location_x]),
+            transform,
+            SMALL_STRUCTURE_SHIFT_LIMIT - location_x,
+            SMALL_STRUCTURE_SHIFT_LIMIT - location_y,
+        )
+        if best is None or _small_structure_score(candidate) > _small_structure_score(best):
+            best = candidate
+    if best is None:
+        return None
+    gray, highpass, gradient, transform, offset_x, offset_y = best
+    if (
+        max(first.shape + second.shape) <= SMALL_STRUCTURE_FINE_MAX_DIMENSION
+        and highpass >= SMALL_STRUCTURE_FINE_TRIGGER_HIGHPASS
+    ):
+        fine = _small_structural_fine_match(first_resized, second)
+        if fine is not None and _small_structure_score(fine) > _small_structure_score(best):
+            best = fine
+            gray, highpass, gradient, transform, offset_x, offset_y = best
+    regular_match = (
+        gray >= SMALL_STRUCTURE_MIN_GRAY_CORRELATION
+        and highpass >= SMALL_STRUCTURE_MIN_HIGHPASS_CORRELATION
+        and gradient >= SMALL_STRUCTURE_MIN_GRADIENT_CORRELATION
+    )
+    contrast_inverted_match = (
+        highpass >= SMALL_STRUCTURE_STRONG_HIGHPASS_CORRELATION
+        and gradient >= SMALL_STRUCTURE_STRONG_HIGHPASS_CORRELATION
+    )
+    if not regular_match and not contrast_inverted_match:
+        return None
+    confidence = max(
+        0.0,
+        min(1.0, 0.20 * max(gray, 0.0) + 0.45 * highpass + 0.35 * gradient),
+    )
+    return _SmallContentMatch(
+        confidence=round(confidence, 6),
+        details={
+            "evidence_kind": "small_region_content",
+            "verification_method": "dense_structure",
+            "transform_second_to_first": transform,
+            "gray_correlation": round(gray, 6),
+            "highpass_correlation": round(highpass, 6),
+            "gradient_correlation": round(gradient, 6),
+            "offset_x_at_128": offset_x,
+            "offset_y_at_128": offset_y,
+            "first_region_x": 0,
+            "first_region_y": 0,
+            "first_region_width": first.shape[1],
+            "first_region_height": first.shape[0],
+            "second_region_x": 0,
+            "second_region_y": 0,
+            "second_region_width": second.shape[1],
+            "second_region_height": second.shape[0],
+        },
+    )
+
+
+def _small_structure_score(values: tuple[float, float, float, str, int, int]) -> float:
+    gray, highpass, gradient, _, _, _ = values
+    return 0.20 * gray + 0.45 * highpass + 0.35 * gradient
+
+
+def _small_structural_fine_match(
+    first_resized: NDArray[np.uint8],
+    second: NDArray[np.uint8],
+) -> tuple[float, float, float, str, int, int] | None:
+    first_highpass = first_resized.astype(np.float32) - cv2.GaussianBlur(
+        first_resized.astype(np.float32),
+        (0, 0),
+        3,
+    )
+    first_gradient = _gradient_magnitude(first_resized)
+    best: tuple[float, float, float, str, int, int] | None = None
+    for transform in (
+        "identity",
+        "flip_horizontal",
+        "flip_vertical",
+        "rotate_180",
+        "rotate_90",
+        "rotate_270",
+        "transpose",
+        "anti_transpose",
+    ):
+        transformed = _small_transform(second, transform)
+        second_resized = cv2.resize(transformed, (128, 128), interpolation=cv2.INTER_CUBIC)
+        second_highpass = second_resized.astype(np.float32) - cv2.GaussianBlur(
+            second_resized.astype(np.float32),
+            (0, 0),
+            3,
+        )
+        second_gradient = _gradient_magnitude(second_resized)
+        for offset_y in range(-8, 9, 2):
+            for offset_x in range(-8, 9, 2):
+                first_gray_crop, second_gray_crop = _shifted_inner_crops(
+                    first_resized,
+                    second_resized,
+                    offset_x,
+                    offset_y,
+                )
+                first_highpass_crop, second_highpass_crop = _shifted_inner_crops(
+                    first_highpass,
+                    second_highpass,
+                    offset_x,
+                    offset_y,
+                )
+                first_gradient_crop, second_gradient_crop = _shifted_inner_crops(
+                    first_gradient,
+                    second_gradient,
+                    offset_x,
+                    offset_y,
+                )
+                candidate = (
+                    _array_correlation(first_gray_crop, second_gray_crop),
+                    _array_correlation(first_highpass_crop, second_highpass_crop),
+                    _array_correlation(first_gradient_crop, second_gradient_crop),
+                    transform,
+                    offset_x,
+                    offset_y,
+                )
+                if best is None or _small_structure_score(candidate) > _small_structure_score(best):
+                    best = candidate
+    return best
+
+
+def _shifted_inner_crops(
+    first: NDArray,
+    second: NDArray,
+    offset_x: int,
+    offset_y: int,
+) -> tuple[NDArray, NDArray]:
+    first_y0 = max(8, 8 + offset_y)
+    first_y1 = min(120, 120 + offset_y)
+    second_y0 = first_y0 - offset_y
+    second_y1 = first_y1 - offset_y
+    first_x0 = max(8, 8 + offset_x)
+    first_x1 = min(120, 120 + offset_x)
+    second_x0 = first_x0 - offset_x
+    second_x1 = first_x1 - offset_x
+    return (
+        first[first_y0:first_y1, first_x0:first_x1],
+        second[second_y0:second_y1, second_x0:second_x1],
+    )
+
+
+def _array_correlation(first: NDArray, second: NDArray) -> float:
+    first_values = first.astype(np.float32)
+    second_values = second.astype(np.float32)
+    first_values -= float(np.mean(first_values))
+    second_values -= float(np.mean(second_values))
+    denominator = float(np.std(first_values) * np.std(second_values))
+    if denominator <= 1e-6:
+        return 1.0 if np.array_equal(first, second) else 0.0
+    return max(
+        -1.0,
+        min(1.0, float(np.mean(first_values * second_values)) / denominator),
+    )
+
+
+def _gradient_magnitude(image: NDArray[np.uint8]) -> NDArray[np.float32]:
+    gradient_x = cv2.Sobel(image, cv2.CV_32F, 1, 0, ksize=3)
+    gradient_y = cv2.Sobel(image, cv2.CV_32F, 0, 1, ksize=3)
+    return cv2.magnitude(gradient_x, gradient_y)
+
+
+def _small_sift_match(
+    first_index: int,
+    second_index: int,
+    first: ImageFeature,
+    second: ImageFeature,
+    cache: dict[tuple[int, bool], _SmallDetailFeature],
+) -> _SmallContentMatch | None:
+    first_feature = _cached_small_detail(first_index, first, False, cache)
+    if len(first_feature.descriptors) < 2:
+        return None
+    best: (
+        tuple[
+            _ModelEstimate,
+            int,
+            float,
+            bool,
+            NDArray[np.float32],
+            NDArray[np.float32],
+        ]
+        | None
+    ) = None
+    matcher = cv2.BFMatcher(cv2.NORM_L2)
+    for flipped in (False, True):
+        second_feature = _cached_small_detail(second_index, second, flipped, cache)
+        if len(second_feature.descriptors) < 2:
+            continue
+        matches = _ratio_matches_float(
+            matcher,
+            first_feature.descriptors,
+            second_feature.descriptors,
+        )
+        if len(matches) < SMALL_SIFT_MIN_INLIERS:
+            continue
+        first_points = np.asarray(
+            [first_feature.points[first_match] for first_match, _, _ in matches],
+            dtype=np.float32,
+        )
+        second_points = np.asarray(
+            [second_feature.points[second_match] for _, second_match, _ in matches],
+            dtype=np.float32,
+        )
+        estimates = _estimate_models(second_points, first_points, 4.0)
+        if not estimates:
+            continue
+        affine_estimates = [item for item in estimates if item.model == "affine"]
+        if not affine_estimates:
+            continue
+        estimate = max(
+            affine_estimates,
+            key=lambda item: (item.inlier_count, -item.median_error),
+        )
+        inlier_ratio = estimate.inlier_count / len(matches)
+        candidate = (
+            estimate,
+            len(matches),
+            inlier_ratio,
+            flipped,
+            first_points,
+            second_points,
+        )
+        if best is None or (
+            estimate.inlier_count,
+            inlier_ratio,
+            -estimate.median_error,
+        ) > (
+            best[0].inlier_count,
+            best[2],
+            -best[0].median_error,
+        ):
+            best = candidate
+    if best is None:
+        return None
+    estimate, match_count, inlier_ratio, flipped, first_points, second_points = best
+    if (
+        estimate.inlier_count < SMALL_SIFT_MIN_INLIERS
+        or inlier_ratio < SMALL_SIFT_MIN_INLIER_RATIO
+        or estimate.median_error > SMALL_SIFT_MAX_MEDIAN_ERROR
+    ):
+        return None
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            0.35 * min(estimate.inlier_count / 20, 1.0)
+            + 0.45 * inlier_ratio
+            + 0.20 * max(0.0, 1.0 - estimate.median_error / 4.0),
+        ),
+    )
+    first_region = _bounding_region(
+        first_points[estimate.inliers],
+        first.width,
+        first.height,
+    )
+    second_inliers = second_points[estimate.inliers].copy()
+    if flipped:
+        second_inliers[:, 0] = second.width - 1 - second_inliers[:, 0]
+    second_region = _bounding_region(second_inliers, second.width, second.height)
+    return _SmallContentMatch(
+        confidence=round(confidence, 6),
+        details={
+            "evidence_kind": "small_region_content",
+            "verification_method": "sift_geometry",
+            "transform_second_to_first": "flip_horizontal" if flipped else "rotation_scale",
+            "matched_keypoints": match_count,
+            "inlier_count": estimate.inlier_count,
+            "inlier_ratio": round(inlier_ratio, 6),
+            "median_reprojection_error": round(estimate.median_error, 4),
+            "transform_model": estimate.model,
+            "first_region_x": first_region[0],
+            "first_region_y": first_region[1],
+            "first_region_width": first_region[2],
+            "first_region_height": first_region[3],
+            "second_region_x": second_region[0],
+            "second_region_y": second_region[1],
+            "second_region_width": second_region[2],
+            "second_region_height": second_region[3],
+        },
+    )
+
+
+def _cached_small_detail(
+    index: int,
+    feature: ImageFeature,
+    flipped: bool,
+    cache: dict[tuple[int, bool], _SmallDetailFeature],
+) -> _SmallDetailFeature:
+    key = (index, flipped)
+    existing = cache.get(key)
+    if existing is not None:
+        return existing
+    if feature.detail_image is None:
+        result = _SmallDetailFeature(
+            points=np.empty((0, 2), dtype=np.float32),
+            descriptors=np.empty((0, 128), dtype=np.float32),
+        )
+        cache[key] = result
+        return result
+    image = cv2.flip(feature.detail_image, 1) if flipped else feature.detail_image
+    scale = min(4.0, max(1.0, 320.0 / max(image.shape)))
+    processing = cv2.resize(
+        image,
+        (max(1, round(image.shape[1] * scale)), max(1, round(image.shape[0] * scale))),
+        interpolation=cv2.INTER_CUBIC,
+    )
+    enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4)).apply(processing)
+    detector = cv2.SIFT_create(
+        nfeatures=800,
+        contrastThreshold=0.01,
+        edgeThreshold=15,
+        sigma=1.2,
+    )
+    keypoints, descriptors = detector.detectAndCompute(enhanced, None)
+    if descriptors is None or not keypoints:
+        result = _SmallDetailFeature(
+            points=np.empty((0, 2), dtype=np.float32),
+            descriptors=np.empty((0, 128), dtype=np.float32),
+        )
+    else:
+        result = _SmallDetailFeature(
+            points=np.asarray(
+                [(point.pt[0] / scale, point.pt[1] / scale) for point in keypoints],
+                dtype=np.float32,
+            ),
+            descriptors=np.ascontiguousarray(descriptors, dtype=np.float32),
+        )
+    cache[key] = result
+    return result
+
+
+def _ratio_matches_float(
+    matcher: cv2.BFMatcher,
+    query: NDArray[np.float32],
+    train: NDArray[np.float32],
+) -> list[tuple[int, int, float]]:
+    accepted: list[tuple[int, int, float]] = []
+    for neighbors in matcher.knnMatch(query, train, k=2):
+        if len(neighbors) < 2:
+            continue
+        best, second_best = neighbors
+        if best.distance < 0.78 * second_best.distance:
+            accepted.append((best.queryIdx, best.trainIdx, float(best.distance)))
+    return accepted
+
+
+def _small_transform(image: NDArray[np.uint8], transform: str) -> NDArray[np.uint8]:
+    if transform == "identity":
+        return image
+    if transform == "flip_horizontal":
+        return cv2.flip(image, 1)
+    if transform == "flip_vertical":
+        return cv2.flip(image, 0)
+    if transform == "rotate_180":
+        return cv2.rotate(image, cv2.ROTATE_180)
+    if transform == "rotate_90":
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    if transform == "rotate_270":
+        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if transform == "transpose":
+        return cv2.transpose(image)
+    if transform == "anti_transpose":
+        return cv2.flip(cv2.transpose(image), -1)
+    raise ValueError(f"未知小区域变换：{transform}")
 
 
 def _mutual_ratio_matches(
@@ -741,6 +1338,76 @@ def _transform_summary(
     scale_y = float(math.hypot(linear[0, 1], linear[1, 1]))
     rotation = math.degrees(math.atan2(linear[1, 0], linear[0, 0]))
     return scale_x, scale_y, rotation
+
+
+def _small_candidate_pairs(
+    features: list[ImageFeature],
+    excluded_pairs: set[tuple[str, str]],
+) -> set[tuple[int, int]]:
+    index: dict[tuple[str, int, int], list[int]] = defaultdict(list)
+    votes: dict[tuple[int, int], int] = defaultdict(int)
+    for feature_index, feature in enumerate(features):
+        if feature.detail_image is None or feature.standard_deviation < 3.0:
+            continue
+        keys: set[tuple[str, int, int]] = set()
+        for fingerprint in feature.fingerprints:
+            for hash_name, value in (("p", fingerprint.phash), ("d", fingerprint.dhash)):
+                for band in range(8):
+                    keys.add((hash_name, band, (value >> (band * 8)) & 0xFF))
+        for key in keys:
+            bucket = index[key]
+            if len(bucket) >= SMALL_CANDIDATE_BUCKET_LIMIT:
+                continue
+            for previous in bucket:
+                pair_key = _feature_pair_key(
+                    features[previous].source_path,
+                    features[previous].page,
+                    feature.source_path,
+                    feature.page,
+                )
+                if pair_key not in excluded_pairs:
+                    votes[(previous, feature_index)] += 1
+            bucket.append(feature_index)
+
+    selected: set[tuple[int, int]] = set()
+    counts: dict[int, int] = defaultdict(int)
+    eligible = sorted(
+        (
+            (vote_count, pair)
+            for pair, vote_count in votes.items()
+            if vote_count >= SMALL_CANDIDATE_MIN_SHARED_HASH_KEYS
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    for _, pair in eligible:
+        first, second = pair
+        if (
+            counts[first] >= SMALL_CANDIDATE_PER_FEATURE_LIMIT
+            or counts[second] >= SMALL_CANDIDATE_PER_FEATURE_LIMIT
+        ):
+            continue
+        selected.add(pair)
+        counts[first] += 1
+        counts[second] += 1
+    return selected
+
+
+def _as_auto_local_pattern_finding(finding: Finding) -> Finding:
+    """Keep a layout detector's evidence without claiming a medical modality."""
+
+    details = dict(finding.details)
+    details["evidence_kind"] = "local_pattern"
+    details["technical_detector"] = "dot_blot_layout"
+    details["medical_modality_claimed"] = False
+    return replace(
+        finding,
+        title="局部重复结构疑似复用",
+        description=(
+            "局部特征的排列和形态高度一致；自动模式仅将其作为通用结构证据，"
+            "不据此判断图片属于 Dot blot。请结合实际实验类型复核。"
+        ),
+        details=details,
+    )
 
 
 def _candidate_pairs(features: list[ImageFeature]) -> set[tuple[int, int]]:

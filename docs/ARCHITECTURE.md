@@ -61,15 +61,17 @@
 
 当前 `BasicScanService` 已贯通输入收集、图片文件/解码像素指纹、图片整体近似候选、局部描述子索引与几何验证、Western blot 条带/背景、Dot blot 斑点排列、荧光通道关系、病理组织多尺度专项验证，以及 Excel 数值解析、片段/区域索引、近似、序列变换、运算和统计候选，最后统一完成结果持久化和 UI 展示。服务接受 `all/image/data` 显式扫描模式；GUI 的图片和数据工作区只收集对应扩展名，并使服务跳过另一套检测器。图片专项另接受 `auto/generic/western_blot/dot_blot/fluorescence/pathology` 路由：通用检测始终运行，指定类型只运行对应专项，自动模式使用颜色、文件名和结构准入。所有图片算法共享同一次页面解码；各检测器通过稳定 `Finding` 契约输出，不把内部数组写入项目文件。`ScanControl` 使用线程安全事件在文件边界、算法阶段和候选验证批次提供协作式暂停/继续/取消；取消抛出独立状态，不保存部分结果。
 
+复合图拆分位于应用服务层：本地检测器用背景差异、形态学连接和有界连通区域生成保守的候选矩形；GUI 负责预览和勾选，项目 schema 8 保存原图坐标。扫描开始后，`PanelMaterialization` 在系统临时目录中按原图页只解码一次并生成无损 PNG 裁剪，现有通用/专项引擎只接收勾选裁剪。引擎完成后立即将 `EvidenceLocation`、页码和两侧证据矩形偏移回原图，再删除临时目录；项目和报告不会持有临时路径。目录输入中的图片集合变化时 GUI 要求重新确认，避免沿用不完整的旧选择。
+
 `medical_image_check.evaluation.image_pairs` 是通用医学图片逐对本地评测入口，支持整图、局部区域、同图 Copy-Move、显式图片类型和分类型指标，详细格式见 `docs/IMAGE_PAIR_EVALUATION.md`。`medical_image_check.evaluation.dot_blot` 保留 Dot blot 专项清单入口，格式见 `docs/DOT_BLOT_EVALUATION.md`。两类评测均只读取外部 JSON 路径/标签清单，不把真实图片写入项目、GUI 或发行包；同一来源组跨 train、validation 和 test 会被拒绝。
 
 Excel 读取层将最近同列表头、标题行和只读公式引用作为瞬时 `NumericCell` 元数据交给 `excel_semantics`；该模块负责表格区块、低信息量和正常派生关系判断。规则输出进入 `excel_result_quality` 后再标记重点/次要/正常层级并关联等价解释；完整 `Finding` 仍通过既有结果契约交给项目、UI 和报告。公式文本不会越过扫描内存边界。结果展示决策见 ADR-0006。
 
-`PerformanceRecorder` 以低侵入上下文记录输入收集、图片读取/解码、通用与四类专项特征、各验证步骤、Excel 读取/规则和结果整理耗时，并从每个阶段扣除协作暂停时间。运行环境探测属于只读基础设施：使用固定参数、无 shell 的 `nvidia-smi` 获取 NVIDIA 名称/驱动/显存，并独立查询 OpenCV CUDA 设备数；任何探测错误都只进入性能画像。当前选择后端仍固定为 CPU。画像随 schema 7 项目结果保存，`PerformanceExporter` 生成不含输入路径和结果证据的 JSON。详细边界见 ADR-0005。
+`PerformanceRecorder` 以低侵入上下文记录输入收集、复合图临时裁剪、图片读取/解码、通用与四类专项特征、各验证步骤、Excel 读取/规则和结果整理耗时，并从每个阶段扣除协作暂停时间。运行环境探测属于只读基础设施：使用固定参数、无 shell 的 `nvidia-smi` 获取 NVIDIA 名称/驱动/显存，并独立查询 OpenCV CUDA 设备数；任何探测错误都只进入性能画像。当前选择后端仍固定为 CPU。画像随 schema 8 项目结果保存，`PerformanceExporter` 生成不含输入路径和结果证据的 JSON。详细边界见 ADR-0005。
 
 项目清单已接入 UI，能够恢复输入路径、图片内容类型、片段设置、Western blot 单条带开关、Excel 容差/目标/风险阈值、最近一次结果、扫描提示和报告路径。图片匹配矩形、几何参数、Western/Dot blot/荧光/病理结构化证据和递归 JSON 数值证据通过稳定结果模型保存并供 UI/三种报告消费，消费者不读取检测器内部状态。表格证据预览属于只读基础设施：按 `EvidenceLocation` 仅加载有限行列窗口，支持 xlsx/xlsm/xls/csv，不修改工作簿。
 
-轻量反馈复用 `Finding.review_status`，由领域辅助函数以不可变方式更新，并在算法版本相同时于重扫后按稳定 `finding_id` 继承。反馈继续随 schema 7 项目存储；反馈清单导出服务只读取已标记结果，生成 Excel 或 JSON，不复制原始图片/表格，也不调用扫描器或修改算法状态。
+轻量反馈复用 `Finding.review_status`，由领域辅助函数以不可变方式更新，并在算法版本相同时于重扫后按稳定 `finding_id` 继承。反馈继续随 schema 8 项目存储；反馈清单导出服务只读取已标记结果，生成 Excel 或 JSON，不复制原始图片/表格，也不调用扫描器或修改算法状态。
 
 报告层通过共享中文标签、证据区域和只读缩略图工具输出三种格式：Excel 保存完整结构化明细，HTML 内嵌 CSS/JavaScript/PNG 并支持本地筛选，PDF 使用 ReportLab 和嵌入式系统中文字体形成 A4 归档版。具体决策见 `decisions/ADR-0004-local-html-pdf-reports.md`。
 

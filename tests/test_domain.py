@@ -11,6 +11,7 @@ from medical_image_check.domain.models import (
     ScanIssue,
     ScanResult,
 )
+from medical_image_check.domain.panels import PanelSelection
 from medical_image_check.domain.performance import (
     GpuDevice,
     RuntimeEnvironment,
@@ -189,6 +190,26 @@ def test_project_image_analysis_mode_persists_and_invalidates_scan(tmp_path: Pat
     assert loaded.image_analysis_mode == "dot_blot"
 
 
+def test_project_panel_splitting_settings_persist_and_invalidate_scan(tmp_path: Path) -> None:
+    source = tmp_path / "composite.png"
+    project = (
+        Project.create("复合图")
+        .with_sources([source])
+        .with_scan_result(ScanResult(1, 1, 0, ()))
+        .with_panel_splitting_enabled(True)
+        .with_panel_selections((PanelSelection(str(source), 1, 1, 10, 20, 100, 80, False),))
+    )
+    destination = tmp_path / "panels.mic-project.json"
+
+    ProjectStore().save(project, destination)
+    loaded = ProjectStore().load(destination)
+
+    assert loaded == project
+    assert loaded.last_scan_result is None
+    assert loaded.panel_splitting_enabled is True
+    assert loaded.panel_selections[0].selected is False
+
+
 def test_project_store_migrates_schema_version_three_western_setting(
     tmp_path: Path,
 ) -> None:
@@ -265,7 +286,7 @@ def test_project_store_migrates_schema_version_four_excel_settings(tmp_path: Pat
     assert loaded.excel_operation_targets == ("0", "1", "10", "100", "1000")
 
 
-@pytest.mark.parametrize("schema_version", [5, 6])
+@pytest.mark.parametrize("schema_version", [5, 6, 7])
 def test_project_store_migrates_recent_schema_without_performance(
     tmp_path: Path,
     schema_version: int,
@@ -298,3 +319,5 @@ def test_project_store_migrates_recent_schema_without_performance(
     assert loaded.schema_version == PROJECT_SCHEMA_VERSION
     assert loaded.last_scan_result is not None
     assert loaded.last_scan_result.performance is None
+    assert loaded.panel_splitting_enabled is False
+    assert loaded.panel_selections == ()

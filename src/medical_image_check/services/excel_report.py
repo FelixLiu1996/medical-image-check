@@ -25,6 +25,13 @@ from medical_image_check.services.report_common import (
 REPORT_SCHEMA_VERSION = 1
 
 
+def _panel_splitting_text(project: Project | None) -> str:
+    if project is None or not project.panel_splitting_enabled:
+        return "关闭"
+    selected = sum(selection.selected for selection in project.panel_selections)
+    return f"启用（已选 {selected}/{len(project.panel_selections)} 个子面板）"
+
+
 class ExcelReportExporter:
     def export(
         self,
@@ -72,6 +79,10 @@ class ExcelReportExporter:
             (
                 "Western blot 单条带检测",
                 "启用" if project and project.western_single_band_enabled else "关闭",
+            ),
+            (
+                "复合图拆分",
+                _panel_splitting_text(project),
             ),
             (
                 "Excel 自定义相对容差",
@@ -206,6 +217,7 @@ class ExcelReportExporter:
                 in {
                     "western_blot",
                     "dot_blot",
+                    "local_pattern",
                     "fluorescence",
                     "pathology",
                 }
