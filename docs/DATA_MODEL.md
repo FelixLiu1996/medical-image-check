@@ -12,7 +12,7 @@
 - 局部图像结果在 `Finding.details` 中记录两侧匹配矩形、覆盖率、关键点/内点统计、重投影误差、几何模型、尺度和旋转，供项目恢复、报告和证据 UI 共用。
 - Western blot 结果记录两侧面板框、条带框、极性、翻转/旋转、条带结构、排列几何、背景纹理和掩膜重叠证据。
 - Dot blot 结果记录两侧实际匹配框、检出/匹配斑点数与索引、归一化排列误差、排列/轮廓/局部图像相似度、最低单斑点相似度，以及裁剪、缩放、旋转、镜像和对比度变换参数。
-- 自动模式复用斑点排列检测器但不判断医学类型时，记录 `evidence_kind=local_pattern`、内部 `technical_detector` 和 `medical_modality_claimed=false`；显式 Dot blot 模式仍记录 `evidence_kind=dot_blot`。
+- 自动模式仅对通过最长边 512 像素斑点阵列准入且未被 Western 覆盖率判为主导的页面运行 Dot 完整提取；任一 Western 区域覆盖至少 35%，或多个区域总覆盖至少 35% 且矩形联合覆盖至少 25% 时才避让，两个零散小 Western 区域不屏蔽同页 Dot。常规组件近圆阈值和共享基线柱条过滤只影响 AUTO。AUTO 命中不判断医学类型，仍记录 `evidence_kind=local_pattern`、内部 `technical_detector` 和 `medical_modality_claimed=false`。显式 Dot blot 模式绕过自动路由并记录 `evidence_kind=dot_blot`。逐页路由布尔值、按需外观相似度缓存、覆盖优先的逐图/逐页对预算 counter 和候选明细只存在于单次扫描运行态；进入各精查阶段的聚合候选数写入 performance schema 1 的独立 `*.candidates` 阶段，既有 `*.verification` 阶段的 `items` 继续表示最终结果数，不进入 `Finding` 证据。
 - 荧光结果记录正常/疑似关系、通道角色、实际匹配通道、两侧区域、结构、前景掩膜、互信息、配准位移和变换。
 - 病理结果记录正常/疑似关系、两侧组织区域、倍率、估算尺度比、组织占比、结构、组织掩膜、指纹距离和变换。
 - `PanelSelection` 保存原图绝对路径、TIFF 页码、稳定子面板序号、`x/y/width/height` 原图坐标和勾选状态；不保存临时裁剪路径或像素副本。

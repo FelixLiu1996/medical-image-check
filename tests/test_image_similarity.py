@@ -1,17 +1,30 @@
+from collections import Counter
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from medical_image_check.domain.image_settings import ImageAnalysisMode
+from medical_image_check.domain.performance import RuntimeEnvironment
 from medical_image_check.engines.image_similarity import (
     ImageDuplicateDetector,
+    _bounded_small_image_candidate_pairs,
+    _feature_pair_key,
     _is_layout_dominant_pair,
+    _local_candidate_pairs,
+    _select_ranked_pairs,
+    _small_candidate_pairs,
     _small_content_match,
     _small_structural_match,
 )
-from medical_image_check.infrastructure.images import extract_image_features_from_pages
+from medical_image_check.infrastructure.images import (
+    TransformFingerprint,
+    extract_image_features_from_pages,
+)
+from medical_image_check.infrastructure.performance import PerformanceRecorder
 
 
 def _synthetic_image() -> np.ndarray:
@@ -185,6 +198,284 @@ def test_detector_does_not_report_unrelated_local_images(tmp_path: Path) -> None
 
     assert issues == []
     assert not any(item.rule_id == "image.local.geometric" for item in findings)
+
+
+def test_bounded_small_image_fallback_recovers_transformed_tissue_crop(
+    tmp_path: Path,
+) -> None:
+    random = np.random.default_rng(5)
+    image = np.full((170, 230, 3), 225, dtype=np.uint8)
+    noise = random.normal(0, 18, image.shape).astype(np.int16)
+    image = np.clip(image.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    for _ in range(80):
+        center = (int(random.integers(3, 227)), int(random.integers(3, 167)))
+        radius = int(random.integers(1, 6))
+        color = tuple(int(value) for value in random.integers(40, 210, size=3))
+        cv2.circle(image, center, radius, color, -1)
+    crop = cv2.resize(image[28:148, 35:195], (145, 105), interpolation=cv2.INTER_AREA)
+    first = tmp_path / "tissue-a.png"
+    second = tmp_path / "tissue-b.png"
+    assert cv2.imwrite(str(first), image)
+    assert cv2.imwrite(str(second), crop)
+    features = [
+        extract_image_features_from_pages(first, (image,))[0],
+        extract_image_features_from_pages(second, (crop,))[0],
+    ]
+
+    assert _local_candidate_pairs(features, set()) == set()
+    assert _small_candidate_pairs(features, set()) == set()
+    assert _bounded_small_image_candidate_pairs(features, set()) == {(0, 1)}
+
+    findings, issues = ImageDuplicateDetector().scan([first, second])
+
+    assert issues == []
+    local = [item for item in findings if item.rule_id == "image.local.geometric"]
+    assert len(local) == 1
+    assert local[0].details["inlier_count"] >= 8
+    assert not any(item.rule_id.startswith("image.dot_blot.") for item in findings)
+
+
+def test_small_image_fallback_does_not_recheck_an_already_matched_local_pair(
+    tmp_path: Path,
+) -> None:
+    image = _synthetic_image()
+    first = extract_image_features_from_pages(tmp_path / "first.png", (image,))[0]
+    second = replace(first, source_path=str(tmp_path / "second.png"))
+    pair_key = _feature_pair_key(first.source_path, first.page, second.source_path, second.page)
+    candidate_counts: list[int] = []
+
+    findings = ImageDuplicateDetector()._small_content_findings(
+        [first, second],
+        {pair_key},
+        supplemental_pairs={(0, 1)},
+        on_candidate_count=candidate_counts.append,
+    )
+
+    assert findings == []
+    assert candidate_counts == [0]
+
+
+def test_small_content_candidate_count_excludes_pairs_without_detail_images(
+    tmp_path: Path,
+) -> None:
+    image = np.full((170, 230, 3), 180, dtype=np.uint8)
+    cv2.circle(image, (80, 80), 25, (40, 70, 120), -1)
+    first = extract_image_features_from_pages(tmp_path / "first.png", (image,))[0]
+    second = replace(first, source_path=str(tmp_path / "second.png"))
+    candidate_counts: list[int] = []
+
+    findings = ImageDuplicateDetector()._small_content_findings(
+        [first, second],
+        set(),
+        supplemental_pairs={(0, 1)},
+        on_candidate_count=candidate_counts.append,
+    )
+
+    assert first.detail_image is None
+    assert findings == []
+    assert candidate_counts == [0]
+
+
+def test_generic_performance_keeps_result_and_candidate_counts_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detector = ImageDuplicateDetector()
+
+    def fake_local_findings(
+        features: object,
+        excluded_pairs: object,
+        checkpoint: object,
+        supplemental_pairs: object,
+        on_candidate_count: object,
+    ) -> list[object]:
+        del features, excluded_pairs, checkpoint, supplemental_pairs
+        assert callable(on_candidate_count)
+        on_candidate_count(5)
+        return []
+
+    def fake_small_findings(
+        features: object,
+        excluded_pairs: object,
+        checkpoint: object,
+        supplemental_pairs: object,
+        on_candidate_count: object,
+    ) -> list[object]:
+        del features, excluded_pairs, checkpoint, supplemental_pairs
+        assert callable(on_candidate_count)
+        on_candidate_count(3)
+        return []
+
+    monkeypatch.setattr(detector, "_local_findings", fake_local_findings)
+    monkeypatch.setattr(detector, "_small_content_findings", fake_small_findings)
+    profiler = PerformanceRecorder()
+
+    findings, issues = detector.scan([], profiler=profiler)
+    performance = profiler.finish(
+        RuntimeEnvironment(
+            operating_system="test",
+            os_release="test",
+            machine="test",
+            processor="test",
+            logical_cpu_count=1,
+            python_version="3.12",
+            opencv_version=cv2.__version__,
+        )
+    )
+    stages = {stage.stage_id: stage for stage in performance.stages}
+
+    assert findings == []
+    assert issues == []
+    assert stages["image.local_geometric_candidates"].items == 5
+    assert stages["image.local_geometric_verification"].items == 0
+    assert stages["image.small_content_candidates"].items == 3
+    assert stages["image.small_content_verification"].items == 0
+
+
+def test_small_image_fallback_candidate_budget_is_global_and_per_image() -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+    features = [replace(template, source_path=f"small-{index:02d}.png") for index in range(40)]
+
+    first = _bounded_small_image_candidate_pairs(features, set())
+    second = _bounded_small_image_candidate_pairs(features, set())
+    counts = Counter(index for pair in first for index in pair)
+
+    assert first == second
+    assert len(first) <= 64
+    assert max(counts.values()) <= 8
+
+
+def test_small_image_fallback_budget_covers_independent_low_vote_pair() -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+
+    def repeated_hash(value: int) -> int:
+        return sum(value << (band * 8) for band in range(8))
+
+    dense_fingerprint = TransformFingerprint(
+        "identity",
+        repeated_hash(1),
+        repeated_hash(2),
+    )
+    shared_low_bytes = sum(3 << (band * 8) for band in range(4))
+    independent = (
+        TransformFingerprint(
+            "identity",
+            shared_low_bytes + sum(4 << (band * 8) for band in range(4, 8)),
+            repeated_hash(6),
+        ),
+        TransformFingerprint(
+            "identity",
+            shared_low_bytes + sum(5 << (band * 8) for band in range(4, 8)),
+            repeated_hash(7),
+        ),
+    )
+    features = [
+        replace(
+            template,
+            source_path=f"dense-{index:02d}.png",
+            fingerprints=(dense_fingerprint,),
+        )
+        for index in range(20)
+    ]
+    features.extend(
+        replace(
+            template,
+            source_path=f"independent-{index}.png",
+            fingerprints=(fingerprint,),
+        )
+        for index, fingerprint in enumerate(independent)
+    )
+
+    selected = _bounded_small_image_candidate_pairs(features, set())
+    counts = Counter(index for pair in selected for index in pair)
+
+    assert (20, 21) in selected
+    assert len(selected) <= 64
+    assert max(counts.values()) <= 8
+
+
+def test_small_candidate_bucket_cap_still_compares_tail_features() -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+    features = [replace(template, source_path=f"same-{index:02d}.png") for index in range(70)]
+
+    primary = _small_candidate_pairs(features, set())
+    fallback = _bounded_small_image_candidate_pairs(features, set())
+
+    assert set(range(70)) <= {index for pair in primary for index in pair}
+    assert set(range(70)) <= {index for pair in fallback for index in pair}
+    assert (64, 65) in primary
+    assert (64, 65) in fallback
+
+
+def test_local_candidate_bucket_cap_still_compares_tail_features() -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+    descriptors = np.zeros((3, 32), dtype=np.uint8)
+    features = [
+        replace(
+            template,
+            source_path=f"same-local-{index:02d}.png",
+            local_descriptors=descriptors,
+        )
+        for index in range(66)
+    ]
+
+    selected = _local_candidate_pairs(features, set())
+
+    assert (64, 65) in selected
+
+
+def test_large_batch_primary_candidate_budgets_are_deterministic() -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+    assert len(template.local_descriptors) >= 3
+    template = replace(template, local_descriptors=template.local_descriptors[:3])
+    features = [replace(template, source_path=f"panel-{index:03d}.png") for index in range(140)]
+
+    local_first = _local_candidate_pairs(features, set())
+    local_second = _local_candidate_pairs(features, set())
+    small_first = _small_candidate_pairs(features, set())
+    small_second = _small_candidate_pairs(features, set())
+    local_counts = Counter(index for pair in local_first for index in pair)
+    small_counts = Counter(index for pair in small_first for index in pair)
+
+    assert local_first == local_second
+    assert small_first == small_second
+    assert len(local_first) <= 512
+    assert len(small_first) <= 256
+    assert max(local_counts.values()) <= 16
+    assert max(small_counts.values()) <= 16
+
+
+def test_ranked_pair_budget_covers_independent_features_before_score_fill() -> None:
+    eligible = [
+        (100, (0, 1)),
+        (99, (0, 2)),
+        (98, (1, 2)),
+        (10, (3, 4)),
+    ]
+
+    first = _select_ranked_pairs(eligible, pair_limit=3, per_feature_limit=2)
+    second = _select_ranked_pairs(eligible, pair_limit=3, per_feature_limit=2)
+    counts = Counter(index for pair in first for index in pair)
+
+    assert first == second == {(0, 1), (0, 2), (3, 4)}
+    assert set(counts) == {0, 1, 2, 3, 4}
+    assert max(counts.values()) <= 2
+
+
+def test_ranked_pair_selection_without_global_limit_keeps_score_order_budgeting() -> None:
+    eligible = [
+        (100, (0, 1)),
+        (99, (0, 2)),
+        (10, (3, 4)),
+    ]
+
+    selected = _select_ranked_pairs(eligible, pair_limit=None, per_feature_limit=1)
+
+    assert selected == {(0, 1), (3, 4)}
 
 
 def test_detector_suppresses_white_background_scientific_layout_matches(

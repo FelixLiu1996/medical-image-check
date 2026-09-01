@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from hashlib import sha256
-from itertools import combinations
+from itertools import combinations, pairwise
 from pathlib import Path
 
 import cv2
@@ -97,12 +97,44 @@ class ImageDuplicateDetector:
                     extracted = extract_image_features_from_pages(path, pages)
                     features.extend(extracted)
                 record_items(profiler, "image.generic_features", len(extracted))
+                extracted_western: tuple[WesternRegion, ...] = ()
+                if self.analysis_mode == ImageAnalysisMode.WESTERN_BLOT or (
+                    self.analysis_mode == ImageAnalysisMode.AUTO
+                    and _looks_like_western_input(path, pages)
+                ):
+                    with profile_stage(profiler, "image.western_features"):
+                        extracted_western = self._western_detector.extract_from_pages(path, pages)
+                        western_regions.extend(extracted_western)
+                    record_items(profiler, "image.western_features", len(extracted_western))
                 if self.analysis_mode in {
                     ImageAnalysisMode.AUTO,
                     ImageAnalysisMode.DOT_BLOT,
                 }:
+                    eligible_dot_pages = None
+                    if self.analysis_mode == ImageAnalysisMode.AUTO:
+                        with profile_stage(profiler, "image.dot_blot_routing"):
+                            western_dominant_pages = _western_dominant_pages(
+                                extracted_western,
+                                pages,
+                            )
+                            eligible_dot_pages = tuple(
+                                eligible and page not in western_dominant_pages
+                                for page, eligible in enumerate(
+                                    self._dot_blot_detector.route_auto_pages(pages),
+                                    start=1,
+                                )
+                            )
+                        record_items(
+                            profiler,
+                            "image.dot_blot_routing",
+                            sum(eligible_dot_pages),
+                        )
                     with profile_stage(profiler, "image.dot_blot_features"):
-                        extracted_dot_blot = self._dot_blot_detector.extract_from_pages(path, pages)
+                        extracted_dot_blot = self._dot_blot_detector.extract_from_pages(
+                            path,
+                            pages,
+                            eligible_pages=eligible_dot_pages,
+                        )
                         dot_blot_regions.extend(extracted_dot_blot)
                     record_items(profiler, "image.dot_blot_features", len(extracted_dot_blot))
                 if self.analysis_mode in {
@@ -133,14 +165,6 @@ class ImageDuplicateDetector:
                         "image.pathology_features",
                         len(extracted_pathology),
                     )
-                if self.analysis_mode == ImageAnalysisMode.WESTERN_BLOT or (
-                    self.analysis_mode == ImageAnalysisMode.AUTO
-                    and _looks_like_western_input(path, pages)
-                ):
-                    with profile_stage(profiler, "image.western_features"):
-                        extracted_western = self._western_detector.extract_from_pages(path, pages)
-                        western_regions.extend(extracted_western)
-                    record_items(profiler, "image.western_features", len(extracted_western))
             except (OSError, ValueError) as exc:
                 issues.append(ScanIssue(str(path), f"无法处理图片：{exc}", "error"))
             finally:
@@ -165,21 +189,50 @@ class ImageDuplicateDetector:
             findings.extend(perceptual_findings)
             exact_pairs.update(perceptual_pairs)
         record_items(profiler, "image.perceptual_verification", len(perceptual_findings))
+        with profile_stage(profiler, "image.generic_candidate_selection"):
+            generic_fallback_pairs = _bounded_small_image_candidate_pairs(
+                features,
+                exact_pairs,
+            )
+        record_items(
+            profiler,
+            "image.generic_candidate_selection",
+            len(generic_fallback_pairs),
+        )
+        local_candidate_counts: list[int] = []
         with profile_stage(profiler, "image.local_geometric_verification"):
-            local_findings = self._local_findings(features, exact_pairs, checkpoint)
+            local_findings = self._local_findings(
+                features,
+                exact_pairs,
+                checkpoint,
+                generic_fallback_pairs,
+                local_candidate_counts.append,
+            )
             findings.extend(local_findings)
-        record_items(profiler, "image.local_geometric_verification", len(local_findings))
+        record_items(
+            profiler,
+            "image.local_geometric_verification",
+            len(local_findings),
+        )
+        record_items(
+            profiler,
+            "image.local_geometric_candidates",
+            sum(local_candidate_counts),
+        )
         local_pairs = {
             pair
             for finding in local_findings
             for pair in (_finding_page_pair(finding),)
             if pair is not None
         }
+        small_content_candidate_counts: list[int] = []
         with profile_stage(profiler, "image.small_content_verification"):
             small_content_findings = self._small_content_findings(
                 features,
                 exact_pairs | local_pairs,
                 checkpoint,
+                generic_fallback_pairs,
+                small_content_candidate_counts.append,
             )
             findings.extend(small_content_findings)
         record_items(
@@ -187,18 +240,44 @@ class ImageDuplicateDetector:
             "image.small_content_verification",
             len(small_content_findings),
         )
+        record_items(
+            profiler,
+            "image.small_content_candidates",
+            sum(small_content_candidate_counts),
+        )
+        dot_blot_candidate_counts: list[int] = []
         with profile_stage(profiler, "image.dot_blot_verification"):
             dot_blot_findings = self._dot_blot_detector.findings(
                 dot_blot_regions,
                 source_duplicate_pairs,
                 checkpoint,
+                dot_blot_candidate_counts.append,
+                candidate_pair_limit=(
+                    AUTO_DOT_CANDIDATE_PAIR_LIMIT
+                    if self.analysis_mode == ImageAnalysisMode.AUTO
+                    else None
+                ),
+                per_page_pair_limit=(
+                    AUTO_DOT_REGION_PAIRS_PER_PAGE_PAIR_LIMIT
+                    if self.analysis_mode == ImageAnalysisMode.AUTO
+                    else None
+                ),
             )
             if self.analysis_mode == ImageAnalysisMode.AUTO:
                 dot_blot_findings = [
                     _as_auto_local_pattern_finding(finding) for finding in dot_blot_findings
                 ]
             findings.extend(dot_blot_findings)
-        record_items(profiler, "image.dot_blot_verification", len(dot_blot_findings))
+        record_items(
+            profiler,
+            "image.dot_blot_verification",
+            len(dot_blot_findings),
+        )
+        record_items(
+            profiler,
+            "image.dot_blot_candidates",
+            sum(dot_blot_candidate_counts),
+        )
         with profile_stage(profiler, "image.fluorescence_verification"):
             fluorescence_findings = self._fluorescence_detector.findings(
                 fluorescence_pages,
@@ -399,9 +478,18 @@ class ImageDuplicateDetector:
         features: list[ImageFeature],
         excluded_pairs: set[tuple[str, str]],
         checkpoint: Callable[[], None] | None = None,
+        supplemental_pairs: set[tuple[int, int]] | None = None,
+        on_candidate_count: Callable[[int], None] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
-        candidates = sorted(_local_candidate_pairs(features, excluded_pairs))
+        supplemental_pairs = _eligible_feature_index_pairs(
+            features,
+            supplemental_pairs or set(),
+            excluded_pairs,
+        )
+        candidates = sorted(_local_candidate_pairs(features, excluded_pairs) | supplemental_pairs)
+        if on_candidate_count:
+            on_candidate_count(len(candidates))
         for candidate_index, (first_index, second_index) in enumerate(candidates):
             if checkpoint and candidate_index % 64 == 0:
                 checkpoint()
@@ -434,10 +522,18 @@ class ImageDuplicateDetector:
         features: list[ImageFeature],
         excluded_pairs: set[tuple[str, str]],
         checkpoint: Callable[[], None] | None = None,
+        supplemental_pairs: set[tuple[int, int]] | None = None,
+        on_candidate_count: Callable[[int], None] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
         detail_cache: dict[tuple[int, bool], _SmallDetailFeature] = {}
-        candidates = sorted(_small_candidate_pairs(features, excluded_pairs))
+        supplemental_pairs = _eligible_feature_index_pairs(
+            features,
+            supplemental_pairs or set(),
+            excluded_pairs,
+        )
+        candidates = sorted(_small_candidate_pairs(features, excluded_pairs) | supplemental_pairs)
+        verified_candidate_count = 0
         for candidate_index, (first_index, second_index) in enumerate(candidates):
             if checkpoint and candidate_index % 32 == 0:
                 checkpoint()
@@ -455,6 +551,7 @@ class ImageDuplicateDetector:
                 continue
             if _is_small_layout_dominant_pair(first, second):
                 continue
+            verified_candidate_count += 1
             match = _small_content_match(
                 first_index,
                 second_index,
@@ -485,6 +582,8 @@ class ImageDuplicateDetector:
                     details=match.details,
                 )
             )
+        if on_candidate_count:
+            on_candidate_count(verified_candidate_count)
         return findings
 
 
@@ -493,6 +592,9 @@ LOCAL_SIGNATURE_OFFSETS = (0, 4, 8, 12, 16, 20, 24, 28)
 LOCAL_SIGNATURE_BUCKET_LIMIT = 64
 LOCAL_CANDIDATE_MAX_DISTANCE = 56
 LOCAL_CANDIDATE_MIN_VOTES = 3
+LARGE_BATCH_FEATURE_THRESHOLD = 128
+LOCAL_LARGE_BATCH_PAIR_LIMIT = 512
+LOCAL_LARGE_BATCH_PER_FEATURE_LIMIT = 16
 LOCAL_MATCH_MAX_DISTANCE = 64
 LOCAL_MATCH_RATIO = 0.80
 LOCAL_MIN_MATCHES = 8
@@ -518,6 +620,17 @@ SMALL_STRUCTURE_FINE_TRIGGER_HIGHPASS = 0.85
 SMALL_CANDIDATE_MIN_SHARED_HASH_KEYS = 10
 SMALL_CANDIDATE_PER_FEATURE_LIMIT = 32
 SMALL_CANDIDATE_BUCKET_LIMIT = 64
+SMALL_LARGE_BATCH_PAIR_LIMIT = 256
+SMALL_LARGE_BATCH_PER_FEATURE_LIMIT = 16
+GENERIC_FALLBACK_MAX_IMAGE_PIXELS = 60_000
+GENERIC_FALLBACK_MIN_SHARED_HASH_KEYS = 4
+GENERIC_FALLBACK_PAIR_LIMIT = 64
+GENERIC_FALLBACK_PER_FEATURE_LIMIT = 8
+AUTO_DOT_WESTERN_DOMINANT_COVERAGE = 0.35
+AUTO_DOT_WESTERN_DOMINANT_TOTAL_COVERAGE = 0.35
+AUTO_DOT_WESTERN_DOMINANT_UNION_COVERAGE = 0.25
+AUTO_DOT_CANDIDATE_PAIR_LIMIT = 256
+AUTO_DOT_REGION_PAIRS_PER_PAGE_PAIR_LIMIT = 4
 
 
 def _is_low_coverage_western_local(
@@ -595,6 +708,73 @@ def _looks_like_western_input(path: Path, pages: tuple[NDArray, ...]) -> bool:
     return bool(colorfulness) and float(np.median(colorfulness)) <= 6.0
 
 
+def _western_dominant_pages(
+    regions: tuple[WesternRegion, ...],
+    pages: tuple[NDArray, ...],
+) -> set[int]:
+    dominant_pages: set[int] = set()
+    page_boxes: dict[int, list[tuple[int, int, int, int]]] = defaultdict(list)
+    for region in regions:
+        if not 1 <= region.page <= len(pages):
+            continue
+        height, width = pages[region.page - 1].shape[:2]
+        x, y, region_width, region_height = region.region
+        left = max(0, min(width, x))
+        top = max(0, min(height, y))
+        right = max(left, min(width, x + region_width))
+        bottom = max(top, min(height, y + region_height))
+        if right <= left or bottom <= top:
+            continue
+        box = (left, top, right, bottom)
+        page_boxes[region.page].append(box)
+        coverage = (right - left) * (bottom - top) / max(width * height, 1)
+        if coverage >= AUTO_DOT_WESTERN_DOMINANT_COVERAGE:
+            dominant_pages.add(region.page)
+    for page, boxes in page_boxes.items():
+        if page in dominant_pages or len(boxes) < 2:
+            continue
+        height, width = pages[page - 1].shape[:2]
+        page_area = max(width * height, 1)
+        total_coverage = (
+            sum((right - left) * (bottom - top) for left, top, right, bottom in boxes) / page_area
+        )
+        union_coverage = _rectangle_union_area(boxes) / page_area
+        if (
+            total_coverage >= AUTO_DOT_WESTERN_DOMINANT_TOTAL_COVERAGE
+            and union_coverage >= AUTO_DOT_WESTERN_DOMINANT_UNION_COVERAGE
+        ):
+            dominant_pages.add(page)
+    return dominant_pages
+
+
+def _rectangle_union_area(boxes: list[tuple[int, int, int, int]]) -> int:
+    boundaries = sorted({coordinate for box in boxes for coordinate in (box[0], box[2])})
+    area = 0
+    for left, right in pairwise(boundaries):
+        if right <= left:
+            continue
+        intervals = sorted(
+            (top, bottom)
+            for box_left, top, box_right, bottom in boxes
+            if box_left < right and box_right > left
+        )
+        covered_height = 0
+        current_top: int | None = None
+        current_bottom: int | None = None
+        for top, bottom in intervals:
+            if current_top is None:
+                current_top, current_bottom = top, bottom
+            elif top > current_bottom:
+                covered_height += current_bottom - current_top
+                current_top, current_bottom = top, bottom
+            else:
+                current_bottom = max(current_bottom, bottom)
+        if current_top is not None and current_bottom is not None:
+            covered_height += current_bottom - current_top
+        area += (right - left) * covered_height
+    return area
+
+
 def _is_layout_dominant_pair(
     first: ImageFeature,
     second: ImageFeature,
@@ -663,9 +843,30 @@ def _local_candidate_pairs(
                         matched_features.add(previous_index)
                 if len(bucket) < LOCAL_SIGNATURE_BUCKET_LIMIT:
                     bucket.append((feature_index, descriptor_value))
+                else:
+                    # Keep the signature index bounded while allowing consecutive
+                    # late features to become candidates for each other.
+                    bucket[feature_index % LOCAL_SIGNATURE_BUCKET_LIMIT] = (
+                        feature_index,
+                        descriptor_value,
+                    )
             for previous_index in matched_features:
                 votes[(previous_index, feature_index)] += 1
-    return {pair for pair, vote_count in votes.items() if vote_count >= LOCAL_CANDIDATE_MIN_VOTES}
+    eligible = sorted(
+        (
+            (vote_count, pair)
+            for pair, vote_count in votes.items()
+            if vote_count >= LOCAL_CANDIDATE_MIN_VOTES
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    if len(features) <= LARGE_BATCH_FEATURE_THRESHOLD:
+        return {pair for _, pair in eligible}
+    return _select_ranked_pairs(
+        eligible,
+        pair_limit=LOCAL_LARGE_BATCH_PAIR_LIMIT,
+        per_feature_limit=LOCAL_LARGE_BATCH_PER_FEATURE_LIMIT,
+    )
 
 
 def _geometric_match(first: ImageFeature, second: ImageFeature) -> _GeometricMatch | None:
@@ -1356,8 +1557,6 @@ def _small_candidate_pairs(
                     keys.add((hash_name, band, (value >> (band * 8)) & 0xFF))
         for key in keys:
             bucket = index[key]
-            if len(bucket) >= SMALL_CANDIDATE_BUCKET_LIMIT:
-                continue
             for previous in bucket:
                 pair_key = _feature_pair_key(
                     features[previous].source_path,
@@ -1367,10 +1566,17 @@ def _small_candidate_pairs(
                 )
                 if pair_key not in excluded_pairs:
                     votes[(previous, feature_index)] += 1
-            bucket.append(feature_index)
+            # The bucket cap limits retained representatives, not who may be
+            # compared. Otherwise every feature after the first 64 entries in a
+            # common hash bucket has no candidate at all, regardless of score.
+            if len(bucket) < SMALL_CANDIDATE_BUCKET_LIMIT:
+                bucket.append(feature_index)
+            else:
+                # Rotate one retained representative after comparison so two late
+                # arrivals can still meet; using the input index keeps this bounded
+                # and deterministic.
+                bucket[feature_index % SMALL_CANDIDATE_BUCKET_LIMIT] = feature_index
 
-    selected: set[tuple[int, int]] = set()
-    counts: dict[int, int] = defaultdict(int)
     eligible = sorted(
         (
             (vote_count, pair)
@@ -1379,17 +1585,149 @@ def _small_candidate_pairs(
         ),
         key=lambda item: (-item[0], item[1]),
     )
-    for _, pair in eligible:
+    if len(features) > LARGE_BATCH_FEATURE_THRESHOLD:
+        return _select_ranked_pairs(
+            eligible,
+            pair_limit=SMALL_LARGE_BATCH_PAIR_LIMIT,
+            per_feature_limit=SMALL_LARGE_BATCH_PER_FEATURE_LIMIT,
+        )
+    return _select_ranked_pairs(
+        eligible,
+        pair_limit=None,
+        per_feature_limit=SMALL_CANDIDATE_PER_FEATURE_LIMIT,
+    )
+
+
+def _select_ranked_pairs(
+    eligible: list[tuple[int, tuple[int, int]]],
+    *,
+    pair_limit: int | None,
+    per_feature_limit: int,
+) -> set[tuple[int, int]]:
+    selected: set[tuple[int, int]] = set()
+    counts: dict[int, int] = defaultdict(int)
+
+    def select_pair(pair: tuple[int, int]) -> bool:
+        if pair in selected:
+            return False
+        if pair_limit is not None and len(selected) >= pair_limit:
+            return False
         first, second = pair
-        if (
-            counts[first] >= SMALL_CANDIDATE_PER_FEATURE_LIMIT
-            or counts[second] >= SMALL_CANDIDATE_PER_FEATURE_LIMIT
-        ):
-            continue
+        if counts[first] >= per_feature_limit or counts[second] >= per_feature_limit:
+            return False
         selected.add(pair)
         counts[first] += 1
         counts[second] += 1
+        return True
+
+    # First choose a ranked maximal matching so a dense cluster cannot consume
+    # per-feature or global budget before independent features receive a candidate.
+    # A second coverage round admits the best remaining pair for features still
+    # unseen. This also matters when pair_limit is None because endpoint limits can
+    # otherwise starve late features in a full hash bucket.
+    for _, pair in eligible:
+        if pair_limit is not None and len(selected) >= pair_limit:
+            break
+        first, second = pair
+        if counts[first] == 0 and counts[second] == 0:
+            select_pair(pair)
+    for _, pair in eligible:
+        if pair_limit is not None and len(selected) >= pair_limit:
+            break
+        first, second = pair
+        if counts[first] == 0 or counts[second] == 0:
+            select_pair(pair)
+
+    # Preserve score ordering for all remaining budget slots.
+    for _, pair in eligible:
+        if pair_limit is not None and len(selected) >= pair_limit:
+            break
+        select_pair(pair)
     return selected
+
+
+def _eligible_feature_index_pairs(
+    features: list[ImageFeature],
+    pairs: set[tuple[int, int]],
+    excluded_pairs: set[tuple[str, str]],
+) -> set[tuple[int, int]]:
+    return {
+        (first_index, second_index)
+        for first_index, second_index in pairs
+        if _feature_pair_key(
+            features[first_index].source_path,
+            features[first_index].page,
+            features[second_index].source_path,
+            features[second_index].page,
+        )
+        not in excluded_pairs
+    }
+
+
+def _bounded_small_image_candidate_pairs(
+    features: list[ImageFeature],
+    excluded_pairs: set[tuple[str, str]],
+) -> set[tuple[int, int]]:
+    """Recover small transformed crops missed by the primary candidate indexes.
+
+    The shortlist is intentionally global and deterministic. It broadens only
+    candidate generation; the existing geometric/detail verifiers still decide
+    whether a finding is emitted.
+    """
+
+    index: dict[tuple[str, int, int], list[int]] = defaultdict(list)
+    votes: dict[tuple[int, int], int] = defaultdict(int)
+    for feature_index, feature in enumerate(features):
+        if (
+            feature.width * feature.height > GENERIC_FALLBACK_MAX_IMAGE_PIXELS
+            or feature.standard_deviation < 3.0
+        ):
+            continue
+        keys: set[tuple[str, int, int]] = set()
+        for fingerprint in feature.fingerprints:
+            for hash_name, value in (("p", fingerprint.phash), ("d", fingerprint.dhash)):
+                for band in range(8):
+                    keys.add((hash_name, band, (value >> (band * 8)) & 0xFF))
+        for key in keys:
+            bucket = index[key]
+            for previous in bucket:
+                first = features[previous]
+                if not _fallback_aspect_compatible(first, feature):
+                    continue
+                pair_key = _feature_pair_key(
+                    first.source_path,
+                    first.page,
+                    feature.source_path,
+                    feature.page,
+                )
+                if pair_key not in excluded_pairs:
+                    votes[(previous, feature_index)] += 1
+            if len(bucket) < SMALL_CANDIDATE_BUCKET_LIMIT:
+                bucket.append(feature_index)
+            else:
+                bucket[feature_index % SMALL_CANDIDATE_BUCKET_LIMIT] = feature_index
+
+    eligible = sorted(
+        (
+            (vote_count, pair)
+            for pair, vote_count in votes.items()
+            if vote_count >= GENERIC_FALLBACK_MIN_SHARED_HASH_KEYS
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    return _select_ranked_pairs(
+        eligible,
+        pair_limit=GENERIC_FALLBACK_PAIR_LIMIT,
+        per_feature_limit=GENERIC_FALLBACK_PER_FEATURE_LIMIT,
+    )
+
+
+def _fallback_aspect_compatible(first: ImageFeature, second: ImageFeature) -> bool:
+    first_ratio = first.width / max(first.height, 1)
+    second_ratio = second.width / max(second.height, 1)
+    direct_error = abs(math.log(max(first_ratio, 1e-12) / max(second_ratio, 1e-12)))
+    rotated_error = abs(math.log(max(first_ratio * second_ratio, 1e-12)))
+    return min(direct_error, rotated_error) <= 0.30
 
 
 def _as_auto_local_pattern_finding(finding: Finding) -> Finding:

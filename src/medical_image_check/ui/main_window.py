@@ -779,7 +779,8 @@ class MainWindow(QMainWindow):
         for mode, label in IMAGE_ANALYSIS_MODE_LABELS.items():
             self._image_analysis_mode_combo.addItem(label, mode.value)
         self._image_analysis_mode_combo.setToolTip(
-            "自动模式会先判断图像类型再运行专项算法；已知类型时可直接指定，减少串类误报。"
+            "自动模式先做轻量内容准入，再运行对应专项算法；已知类型时可直接指定，"
+            "显式选择 Dot blot 不受自动准入限制。"
         )
         image_settings_first_row.addWidget(self._image_analysis_mode_combo)
         self._western_single_band_check = QCheckBox("检测 Western blot 单条带相似")
