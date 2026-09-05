@@ -167,3 +167,58 @@ def test_build_negative_review_package_is_simple_and_self_contained(tmp_path: Pa
     with zipfile.ZipFile(archive) as bundle:
         assert f"{output.name}/index.html" in bundle.namelist()
         assert f"{output.name}/manifest.json" in bundle.namelist()
+
+
+def test_select_negative_candidates_clusters_overlapping_final_regression_regions(
+    tmp_path: Path,
+) -> None:
+    batch = make_batch(tmp_path)
+    baseline = json.loads(
+        (batch / "blind-algorithm-findings-summary.json").read_text(encoding="utf-8")
+    )
+    first = baseline["cases"][0]["runs"][0]["findings"][0]
+    overlapping = json.loads(json.dumps(first))
+    overlapping["finding_id"] = "finding-2"
+    overlapping["confidence"] = 0.91
+    overlapping["details"]["first_region_x"] += 4
+    overlapping["details"]["second_region_x"] += 3
+    distant = json.loads(json.dumps(first))
+    distant["finding_id"] = "finding-3"
+    distant["details"]["first_region_x"] = 150
+    distant["details"]["second_region_x"] = 150
+    summary = batch / "final-regression.json"
+    write_json(
+        summary,
+        {
+            "artifact_kind": "reviewed_negative_panel_regression",
+            "dataset_id": "negative-test",
+            "algorithm_version": "algorithm-final",
+            "cases": [
+                {
+                    "case_id": "eval-002",
+                    "status": "complete",
+                    "panel_count": 12,
+                    "findings": [first, overlapping, distant],
+                }
+            ],
+        },
+    )
+
+    result = select_negative_candidates(
+        batch,
+        sample_size=2,
+        configuration="panel-split-auto-final",
+        seed="test-seed",
+        findings_summary=summary,
+        cluster_iou_threshold=0.5,
+    )
+
+    sampling = result["sampling"]
+    assert result["algorithm_version"] == "algorithm-final"
+    assert sampling["all_negative_candidate_count"] == 3
+    assert sampling["redistributable_region_cluster_count"] == 2
+    assert sampling["region_cluster_candidate_count_removed"] == 1
+    assert sorted(item["cluster_size"] for item in result["selected_candidates"]) == [1, 2]
+    clustered = next(item for item in result["selected_candidates"] if item["cluster_size"] == 2)
+    assert clustered["finding_id"] == "finding-2"
+    assert clustered["cluster_member_finding_ids"] == ["finding-1", "finding-2"]

@@ -733,7 +733,8 @@ def _is_https_url(value: str) -> bool:
 
 def _write_zip(source: Path, archive: Path) -> None:
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as handle:
-        for path in sorted(item for item in source.rglob("*") if item.is_file()):
+        paths = (item for item in source.rglob("*") if item.is_file())
+        for path in sorted(paths, key=lambda item: item.relative_to(source).as_posix()):
             handle.write(path, path.relative_to(source).as_posix())
 
 

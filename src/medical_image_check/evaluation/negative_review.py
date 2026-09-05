@@ -56,6 +56,8 @@ def build_negative_review_package(
     sample_size: int = 32,
     configuration: str = "panel-split-auto",
     seed: str = "negative-review-v1",
+    findings_summary: str | Path | None = None,
+    cluster_iou_threshold: float = 0.5,
 ) -> dict[str, Any]:
     batch_path = Path(batch).expanduser().resolve()
     output = Path(output_directory).expanduser().resolve()
@@ -72,6 +74,8 @@ def build_negative_review_package(
         sample_size=sample_size,
         configuration=configuration,
         seed=seed,
+        findings_summary=findings_summary,
+        cluster_iou_threshold=cluster_iou_threshold,
     )
     staging = output.with_name(f".{output.name}.building-{os.getpid()}")
     if staging.exists():
@@ -90,9 +94,11 @@ def build_negative_review_package(
             "sampling": selection["sampling"],
             "review_scope": "classify_sampled_negative_algorithm_candidates_only",
             "metric_guardrail": (
-                "This is a deterministic, case-balanced calibration sample from redistributable "
-                "official figures. It can reveal false-positive patterns but cannot by itself "
-                "produce exact full-batch precision or F1."
+                "This is a deterministic, case-balanced calibration sample of region-cluster "
+                "representatives from redistributable official figures. A representative label is "
+                "not automatically propagated to every cluster member. This package can reveal "
+                "false-positive patterns but cannot by itself produce exact full-batch precision "
+                "or F1."
             ),
             "review_task_count": len(tasks),
             "review_case_count": len({task["case_id"] for task in tasks}),
@@ -117,7 +123,11 @@ def build_negative_review_package(
             ),
             "files": [],
         }
-        for path in sorted(item for item in staging.rglob("*") if item.is_file()):
+        manifest_paths = (item for item in staging.rglob("*") if item.is_file())
+        for path in sorted(
+            manifest_paths,
+            key=lambda item: item.relative_to(staging).as_posix(),
+        ):
             manifest["files"].append(
                 {
                     "path": path.relative_to(staging).as_posix(),
@@ -138,7 +148,11 @@ def build_negative_review_package(
                 "w",
                 compression=zipfile.ZIP_DEFLATED,
             ) as bundle:
-                for path in sorted(item for item in output.rglob("*") if item.is_file()):
+                archive_paths = (item for item in output.rglob("*") if item.is_file())
+                for path in sorted(
+                    archive_paths,
+                    key=lambda item: item.relative_to(output).as_posix(),
+                ):
                     bundle.write(path, (Path(output.name) / path.relative_to(output)).as_posix())
             temporary_archive.replace(archive)
     except Exception:
@@ -153,6 +167,7 @@ def build_negative_review_package(
         "review_task_count": len(tasks),
         "review_case_count": len({task["case_id"] for task in tasks}),
         "candidate_population_count": selection["sampling"]["all_negative_candidate_count"],
+        "candidate_cluster_count": selection["sampling"]["redistributable_region_cluster_count"],
         "redistributable_candidate_count": selection["sampling"]["redistributable_candidate_count"],
         "restricted_candidate_count": selection["sampling"]["restricted_candidate_count"],
     }
@@ -164,10 +179,19 @@ def select_negative_candidates(
     sample_size: int,
     configuration: str,
     seed: str,
+    findings_summary: str | Path | None = None,
+    cluster_iou_threshold: float = 0.5,
 ) -> dict[str, Any]:
     batch_path = Path(batch).expanduser().resolve()
     truth = read_json(batch_path / "ground-truth-sealed.json")
-    findings = read_json(batch_path / "blind-algorithm-findings-summary.json")
+    findings_path = (
+        Path(findings_summary).expanduser().resolve()
+        if findings_summary is not None
+        else batch_path / "blind-algorithm-findings-summary.json"
+    )
+    findings = read_json(findings_path)
+    if not 0 < cluster_iou_threshold <= 1:
+        raise ValueError("cluster_iou_threshold must be in (0, 1]")
     expected_by_case = {
         str(case.get("case_id")): str(case.get("expected") or "")
         for case in truth.get("cases", [])
@@ -186,14 +210,7 @@ def select_negative_candidates(
         case_id = str(case.get("case_id") or "")
         if expected_by_case.get(case_id) != "negative":
             continue
-        run = next(
-            (
-                item
-                for item in case.get("runs", [])
-                if isinstance(item, dict) and item.get("configuration") == configuration
-            ),
-            None,
-        )
+        run = _configured_case_run(case, findings, configuration)
         if (
             not isinstance(run, dict)
             or run.get("status") != "complete"
@@ -225,12 +242,16 @@ def select_negative_candidates(
             if candidate["redistributable"]:
                 redistributable.append(candidate)
 
+    clustered_redistributable = _region_cluster_representatives(
+        redistributable,
+        iou_threshold=cluster_iou_threshold,
+    )
     strata: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    for candidate in redistributable:
+    for candidate in clustered_redistributable:
         strata[(candidate["rule_id"], candidate["confidence_band"])].append(candidate)
     if not strata:
         raise ValueError("No redistributable negative candidates are available for review")
-    target = min(sample_size, len(redistributable))
+    target = min(sample_size, len(clustered_redistributable))
     if target < len(strata):
         raise ValueError(
             f"sample_size {target} is smaller than the {len(strata)} non-empty rule/band strata"
@@ -248,20 +269,28 @@ def select_negative_candidates(
 
     population_by_rule = Counter(item["rule_id"] for item in all_candidates)
     redistributable_by_rule = Counter(item["rule_id"] for item in redistributable)
+    redistributable_clusters_by_rule = Counter(
+        item["rule_id"] for item in clustered_redistributable
+    )
     selected_by_rule = Counter(item["rule_id"] for item in selected)
     stratum_records = []
     for key in sorted(strata):
         rule_id, band = key
-        population = len(strata[key])
+        cluster_population = len(strata[key])
+        candidate_population = sum(int(item["cluster_size"]) for item in strata[key])
         selected_count = allocation[key]
         stratum_records.append(
             {
                 "rule_id": rule_id,
                 "rule_label": RULE_LABELS.get(rule_id, rule_id),
                 "confidence_band": band,
-                "redistributable_population_count": population,
+                "redistributable_candidate_count": candidate_population,
+                "region_cluster_count": cluster_population,
                 "selected_count": selected_count,
-                "descriptive_expansion_weight": round(population / selected_count, 6),
+                "descriptive_expansion_weight": round(
+                    cluster_population / selected_count,
+                    6,
+                ),
             }
         )
     return {
@@ -269,9 +298,13 @@ def select_negative_candidates(
         "algorithm_version": str(findings.get("algorithm_version") or ""),
         "selected_candidates": selected,
         "sampling": {
-            "mode": "deterministic_case_balanced_stratified_calibration",
+            "mode": "deterministic_region_clustered_case_balanced_stratified_calibration",
             "seed": seed,
             "configuration": configuration,
+            "findings_summary": findings_path.name,
+            "findings_summary_sha256": sha256_file(findings_path),
+            "region_cluster_iou_threshold": cluster_iou_threshold,
+            "region_cluster_scope": "same_case_same_rule_same_unordered_source_pair",
             "confidence_bands": {"high": ">=0.90", "medium": ">=0.75 and <0.90", "low": "<0.75"},
             "selection_scope": "redistributable_official_figures_only",
             "all_evaluable_negative_case_count": len(evaluable_negative_cases),
@@ -280,11 +313,17 @@ def select_negative_candidates(
             "redistributable_candidate_count": len(redistributable),
             "restricted_candidate_count": len(all_candidates) - len(redistributable),
             "exact_duplicate_candidate_count_removed": exact_duplicate_count,
+            "redistributable_region_cluster_count": len(clustered_redistributable),
+            "region_cluster_candidate_count_removed": len(redistributable)
+            - len(clustered_redistributable),
             "selected_candidate_count": len(selected),
             "selected_case_count": len({item["case_id"] for item in selected}),
             "case_cap": 2,
             "population_by_rule": dict(sorted(population_by_rule.items())),
             "redistributable_population_by_rule": dict(sorted(redistributable_by_rule.items())),
+            "redistributable_clusters_by_rule": dict(
+                sorted(redistributable_clusters_by_rule.items())
+            ),
             "selected_by_rule": dict(sorted(selected_by_rule.items())),
             "strata": stratum_records,
             "inference_limit": (
@@ -293,6 +332,169 @@ def select_negative_candidates(
             ),
         },
     }
+
+
+def _configured_case_run(
+    case: dict[str, Any],
+    findings: dict[str, Any],
+    configuration: str,
+) -> dict[str, Any] | None:
+    runs = case.get("runs")
+    if isinstance(runs, list):
+        return next(
+            (
+                item
+                for item in runs
+                if isinstance(item, dict) and item.get("configuration") == configuration
+            ),
+            None,
+        )
+    if not isinstance(case.get("findings"), list):
+        return None
+    artifact_kind = str(findings.get("artifact_kind") or "")
+    if artifact_kind not in {
+        "reviewed_negative_panel_regression",
+        "negative_panel_regression",
+    }:
+        return None
+    run = dict(case)
+    run["configuration"] = configuration
+    run["scan_input_count"] = int(case.get("panel_count") or case.get("image_count") or 0)
+    return run
+
+
+def _region_cluster_representatives(
+    candidates: list[dict[str, Any]],
+    *,
+    iou_threshold: float,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, tuple[str, str]], list[dict[str, Any]]] = defaultdict(list)
+    canonical_by_review_id: dict[
+        str,
+        tuple[tuple[str, str], tuple[tuple[int, int, int, int], tuple[int, int, int, int]]],
+    ] = {}
+    unclusterable: list[dict[str, Any]] = []
+    for candidate in candidates:
+        endpoints = _canonical_candidate_endpoints(candidate)
+        if endpoints is None:
+            unclusterable.append(candidate)
+            continue
+        paths, regions = endpoints
+        canonical_by_review_id[str(candidate["review_id"])] = (paths, regions)
+        grouped[(candidate["case_id"], candidate["rule_id"], paths)].append(candidate)
+
+    representatives: list[dict[str, Any]] = []
+    for group_key in sorted(grouped):
+        items = sorted(grouped[group_key], key=lambda item: item["review_id"])
+        parents = list(range(len(items)))
+
+        for first_index, first in enumerate(items):
+            first_regions = canonical_by_review_id[str(first["review_id"])][1]
+            for second_index in range(first_index + 1, len(items)):
+                second = items[second_index]
+                second_regions = canonical_by_review_id[str(second["review_id"])][1]
+                if all(
+                    _region_iou(first_region, second_region) >= iou_threshold
+                    for first_region, second_region in zip(
+                        first_regions,
+                        second_regions,
+                        strict=True,
+                    )
+                ):
+                    _union_find_join(parents, first_index, second_index)
+
+        components: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for index, item in enumerate(items):
+            components[_union_find_root(parents, index)].append(item)
+        for component in components.values():
+            ordered = sorted(
+                component,
+                key=lambda item: (-float(item["confidence"]), item["review_id"]),
+            )
+            representative = dict(ordered[0])
+            member_ids = sorted(str(item["finding_id"]) for item in component)
+            cluster_digest = hashlib.sha256(
+                "|".join(
+                    str(item["exact_signature"])
+                    for item in sorted(
+                        component,
+                        key=lambda item: item["exact_signature"],
+                    )
+                ).encode("utf-8")
+            ).hexdigest()[:16]
+            representative["cluster_id"] = f"{representative['case_id']}-{cluster_digest}"
+            representative["cluster_size"] = len(component)
+            representative["cluster_member_finding_ids"] = member_ids
+            representatives.append(representative)
+
+    for candidate in unclusterable:
+        representative = dict(candidate)
+        representative["cluster_id"] = f"{candidate['case_id']}-{candidate['exact_signature'][:16]}"
+        representative["cluster_size"] = 1
+        representative["cluster_member_finding_ids"] = [str(candidate["finding_id"])]
+        representatives.append(representative)
+    return sorted(representatives, key=lambda item: item["review_id"])
+
+
+def _union_find_root(parents: list[int], index: int) -> int:
+    while parents[index] != index:
+        parents[index] = parents[parents[index]]
+        index = parents[index]
+    return index
+
+
+def _union_find_join(parents: list[int], first: int, second: int) -> None:
+    first_root = _union_find_root(parents, first)
+    second_root = _union_find_root(parents, second)
+    if first_root != second_root:
+        parents[second_root] = first_root
+
+
+def _canonical_candidate_endpoints(
+    candidate: dict[str, Any],
+) -> (
+    tuple[
+        tuple[str, str],
+        tuple[tuple[int, int, int, int], tuple[int, int, int, int]],
+    ]
+    | None
+):
+    locations = candidate.get("locations")
+    if not isinstance(locations, list) or len(locations) != 2:
+        return None
+    endpoints: list[tuple[str, tuple[int, int, int, int]]] = []
+    for location in locations:
+        if not isinstance(location, dict):
+            return None
+        path = _normalized_path(location.get("local_path"))
+        region = location.get("region")
+        if not path or not isinstance(region, list) or len(region) != 4:
+            return None
+        endpoints.append((path, tuple(int(value) for value in region)))
+    endpoints.sort(key=lambda item: (item[0], item[1]))
+    return (
+        (endpoints[0][0], endpoints[1][0]),
+        (endpoints[0][1], endpoints[1][1]),
+    )
+
+
+def _region_iou(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> float:
+    first_x, first_y, first_width, first_height = first
+    second_x, second_y, second_width, second_height = second
+    intersection_width = max(
+        0,
+        min(first_x + first_width, second_x + second_width) - max(first_x, second_x),
+    )
+    intersection_height = max(
+        0,
+        min(first_y + first_height, second_y + second_height) - max(first_y, second_y),
+    )
+    intersection = intersection_width * intersection_height
+    union = first_width * first_height + second_width * second_height - intersection
+    return intersection / union if union else 0.0
 
 
 def _asset_catalog(
@@ -558,6 +760,9 @@ def _prepare_tasks(output: Path, candidates: list[dict[str, Any]]) -> list[dict[
                 key: candidate[key]
                 for key in (
                     "review_id",
+                    "cluster_id",
+                    "cluster_size",
+                    "cluster_member_finding_ids",
                     "case_id",
                     "configuration",
                     "finding_id",
@@ -648,7 +853,7 @@ def _render_html(payload: dict[str, Any]) -> str:
     return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>阴性算法候选复核</title>
 <style>:root{{--ink:#17324d;--muted:#687b8d;--line:#d7e1e9;--blue:#176fc1;--green:#147d55;--red:#b42318;--amber:#9a5d00}}*{{box-sizing:border-box}}body{{margin:0;background:#eef3f7;color:var(--ink);font:16px/1.58 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}}header{{position:sticky;top:0;z-index:4;background:rgba(255,255,255,.98);border-bottom:1px solid var(--line);padding:15px 24px}}h1{{margin:0;font-size:24px}}.sub,.meta{{color:var(--muted)}}.toolbar{{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:10px}}button,input,select,textarea{{font:inherit}}button{{border:1px solid #a9bfd1;background:white;border-radius:9px;padding:9px 13px;cursor:pointer}}button.primary{{background:var(--blue);border-color:var(--blue);color:white;font-weight:700}}input[type=search]{{min-width:250px;border:1px solid #a9bfd1;border-radius:9px;padding:9px 11px}}.progress{{margin-left:auto;color:var(--green);font-weight:800}}main{{max-width:1260px;margin:auto;padding:20px}}.instruction{{background:white;border:2px solid #8dbde5;border-radius:14px;padding:17px 19px}}.instruction h2{{margin:0 0 7px}}.instruction p{{margin:6px 0}}.stats{{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px}}.stat{{background:#f2f6f9;border-radius:8px;padding:7px 11px}}.task{{background:white;border:1px solid var(--line);border-radius:14px;margin:18px 0;overflow:hidden}}.task.done{{border-color:#82c4aa}}.head{{padding:14px 17px;border-bottom:1px solid var(--line);display:flex;gap:15px}}.counter{{font-size:19px;font-weight:800;min-width:94px}}.title{{font-weight:800}}.body{{padding:17px}}.question{{background:#edf7ff;border-left:5px solid var(--blue);border-radius:8px;padding:11px 13px;font-size:18px;font-weight:800}}.ab{{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:13px}}figure{{margin:0;border:1px solid var(--line);border-radius:10px;padding:10px;background:white}}figure>img{{display:block;width:100%;height:260px;object-fit:contain}}figcaption{{font-weight:800;text-align:center;margin-top:6px}}details{{margin-top:9px}}summary{{cursor:pointer;color:#37617f;font-weight:650}}.overview{{display:block;max-width:100%;max-height:760px;object-fit:contain;margin:9px auto}}.answer{{border-top:1px solid var(--line);margin-top:16px;padding-top:15px}}.choices{{display:flex;gap:9px;flex-wrap:wrap}}.choice input{{position:absolute;opacity:0;pointer-events:none}}.choice span{{display:block;border:2px solid #aec0cf;border-radius:9px;padding:10px 15px;font-weight:800;cursor:pointer}}.choice input:checked+span{{border-color:var(--blue);background:#eaf4ff}}.choice.duplicate input:checked+span{{border-color:var(--green);background:#eaf8f2;color:var(--green)}}.choice.not_duplicate input:checked+span{{border-color:var(--red);background:#fff0ef;color:var(--red)}}.choice.uncertain input:checked+span{{border-color:var(--amber);background:#fff7e8;color:var(--amber)}}textarea{{width:100%;min-height:58px;margin-top:10px;border:1px solid #b8c9d7;border-radius:9px;padding:9px}}.hidden{{display:none}}@media(max-width:760px){{header{{position:static}}main{{padding:11px}}.ab{{grid-template-columns:1fr}}figure>img{{height:auto;max-height:420px}}.progress{{margin-left:0}}}}</style></head><body>
 <header><h1>阴性算法候选复核</h1><div class="sub">每组只判断一对图片；无需检查算法参数，也无需重新查找论文。</div><div class="toolbar"><input id="search" type="search" placeholder="搜索案例或规则"><select id="filter"><option value="all">全部</option><option value="pending">仅未完成</option><option value="completed">仅已完成</option></select><button class="primary" id="export">导出反馈 JSON</button><span class="progress" id="progress"></span></div></header>
-<main><section class="instruction"><h2>你只需要判断：A 和 B 是否真的重复</h2><p>红框和上方局部图是算法认为相似的位置。确实是同一内容或复用关系，选“正确检出”；只是同类组织、相似排版、正常内参或其他巧合，选“误报”；看不清选“不确定”。</p><p><strong>本包是第一轮误报校准样本，不是全部阴性候选。</strong>它从可合法分享图片的候选中按规则和置信度分层选取，用来先找主要误报模式；不能单独作为最终 Precision/F1。</p><div class="stats"><span class="stat">本次 <b>{payload["review_task_count"]}</b> 组</span><span class="stat">覆盖 <b>{payload["review_case_count"]}</b> 篇论文</span><span class="stat">可分享候选池 <b>{payload["sampling"]["redistributable_candidate_count"]}</b> 条</span></div></section>{cards}</main>
+<main><section class="instruction"><h2>你只需要判断：A 和 B 是否真的重复</h2><p>红框和上方局部图是算法认为相似的位置。确实是同一内容或复用关系，选“正确检出”；只是同类组织、相似排版、正常内参或其他巧合，选“误报”；看不清选“不确定”。</p><p><strong>本包是聚类后的误报校准样本，不是全部阴性候选。</strong>它先合并同规则、同图片对且双方区域近似的候选，再按规则和置信度分层抽取代表项；医生判断不会自动冒充整个候选簇的正式标签，也不能单独作为最终 Precision/F1。</p><div class="stats"><span class="stat">本次 <b>{payload["review_task_count"]}</b> 组</span><span class="stat">覆盖 <b>{payload["review_case_count"]}</b> 篇论文</span><span class="stat">可分享候选 <b>{payload["sampling"]["redistributable_candidate_count"]}</b> 条</span><span class="stat">区域聚类后 <b>{payload["sampling"]["redistributable_region_cluster_count"]}</b> 簇</span></div></section>{cards}</main>
 <script id="seed" type="application/json">{seed}</script><script>const seed=JSON.parse(document.getElementById('seed').textContent),key='negative-candidate-review-v1:'+seed.dataset_id+':'+seed.configuration;let state={{reviews:{{}}}};try{{const saved=JSON.parse(localStorage.getItem(key)||'{{}}');if(saved&&saved.reviews)state=saved}}catch(e){{}}function done(id){{return ['duplicate','not_duplicate','uncertain'].includes((state.reviews[id]||{{}}).decision)}}function apply(){{const q=document.getElementById('search').value.trim().toLowerCase(),f=document.getElementById('filter').value;let n=0;document.querySelectorAll('[data-task]').forEach(card=>{{const d=done(card.dataset.task);if(d)n++;card.classList.toggle('done',d);card.classList.toggle('hidden',!((f==='all'||(f==='pending'&&!d)||(f==='completed'&&d))&&card.textContent.toLowerCase().includes(q)))}});document.getElementById('progress').textContent=`已完成 ${{n}}/${{seed.review_ids.length}}`}}document.querySelectorAll('[data-task]').forEach(card=>{{const id=card.dataset.task,s=state.reviews[id]||{{}};card.querySelectorAll('[data-decision]').forEach(el=>{{el.checked=s.decision===el.value;el.addEventListener('change',()=>{{state.reviews[id]=state.reviews[id]||{{}};state.reviews[id].decision=el.value;localStorage.setItem(key,JSON.stringify(state));apply()}})}});const note=card.querySelector('[data-note]');note.value=s.note||'';note.addEventListener('input',()=>{{state.reviews[id]=state.reviews[id]||{{}};state.reviews[id].note=note.value;localStorage.setItem(key,JSON.stringify(state))}})}});document.getElementById('search').addEventListener('input',apply);document.getElementById('filter').addEventListener('change',apply);document.getElementById('export').addEventListener('click',()=>{{const payload={{...seed,exported_at:new Date().toISOString(),task_reviews:seed.review_ids.map(id=>({{review_id:id,decision:(state.reviews[id]||{{}}).decision||'pending',note:(state.reviews[id]||{{}}).note||''}}))}};const blob=new Blob([JSON.stringify(payload,null,2)],{{type:'application/json'}}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${{seed.dataset_id}}-negative-feedback.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}});apply();</script></body></html>"""
 
 
@@ -658,7 +863,12 @@ def _render_task(task: dict[str, Any], index: int, total: int) -> str:
         f'<label class="choice {_e(value)}"><input type="radio" name="decision-{_e(task["review_id"])}" value="{_e(value)}" data-decision><span>{_e(label)}</span></label>'
         for value, label in REVIEW_DECISIONS
     )
-    return f"""<article class="task" data-task="{_e(task["review_id"])}"><div class="head"><div class="counter">第 {index}/{total} 组<div class="meta">{_e(task["case_id"])}</div></div><div><div class="title">{_e(task["rule_label"])} · 置信度 {float(task["confidence"]):.3f}</div><div class="meta">{_e(task["title"])}</div></div></div><div class="body"><div class="question">A 和 B 是否存在重复或复用关系？</div><div class="ab">{figures}</div><details><summary>查看算法说明</summary><p>{_e(task["description"])}</p><div class="meta">规则：{_e(task["rule_id"])}；Finding ID：{_e(task["finding_id"])}</div></details><section class="answer"><div class="choices">{decisions}</div><textarea data-note placeholder="可选备注，例如：同类组织但不是同一区域、只是排版相似、正常内参"></textarea></section></div></article>"""
+    cluster_note = (
+        f" · 代表 {int(task['cluster_size'])} 条区域近似候选"
+        if int(task["cluster_size"]) > 1
+        else ""
+    )
+    return f"""<article class="task" data-task="{_e(task["review_id"])}"><div class="head"><div class="counter">第 {index}/{total} 组<div class="meta">{_e(task["case_id"])}</div></div><div><div class="title">{_e(task["rule_label"])} · 置信度 {float(task["confidence"]):.3f}{_e(cluster_note)}</div><div class="meta">{_e(task["title"])}</div></div></div><div class="body"><div class="question">A 和 B 是否存在重复或复用关系？</div><div class="ab">{figures}</div><details><summary>查看算法说明</summary><p>{_e(task["description"])}</p><div class="meta">规则：{_e(task["rule_id"])}；Finding ID：{_e(task["finding_id"])}；候选簇：{_e(task["cluster_id"])}</div></details><section class="answer"><div class="choices">{decisions}</div><textarea data-note placeholder="可选备注，例如：同类组织但不是同一区域、只是排版相似、正常内参"></textarea></section></div></article>"""
 
 
 def _render_location(location: dict[str, Any]) -> str:
@@ -689,7 +899,7 @@ def _readme(payload: dict[str, Any]) -> str:
 
 完成后点击页面顶部“导出反馈 JSON”，将 JSON 发回。
 
-本次共有 {payload["review_task_count"]} 组，涉及 {payload["review_case_count"]} 个案例。候选来自 {payload["configuration"]}，在 {payload["sampling"]["redistributable_candidate_count"]} 条可分享图片候选中按算法规则和置信度分层、并限制单篇论文任务数后选取。
+本次共有 {payload["review_task_count"]} 组，涉及 {payload["review_case_count"]} 个案例。候选来自 {payload["configuration"]}，先将 {payload["sampling"]["redistributable_candidate_count"]} 条可分享图片候选按同案例、同规则、同图片对和双方区域重叠聚为 {payload["sampling"]["redistributable_region_cluster_count"]} 簇，再按规则和置信度分层、并限制单篇论文任务数后选取。
 
-本包用途是先定位主要误报模式，不是全部阴性候选。由于采用了案例均衡且排除了受限制正式图，本轮结果不能单独作为最终 Precision/F1；后续需根据反馈决定扩大复核、固定阴性真值或建立来源隔离的新 test。
+本包用途是先定位主要误报模式，不是全部阴性候选。医生对代表候选的判断不会自动传播为整个簇的正式标签。由于采用了区域聚类、案例均衡且排除了受限制正式图，本轮结果不能单独作为最终 Precision/F1；后续需根据反馈决定扩大复核、固定阴性真值或建立来源隔离的新 test。
 """
