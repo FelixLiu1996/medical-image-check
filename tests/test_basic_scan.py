@@ -42,8 +42,8 @@ def test_basic_scan_collects_directory_and_reports_duplicates(tmp_path: Path) ->
         "excel.cell.target_operation",
     }
     assert result.algorithm_version == (
-        "generic-image-local-3+western-blot-2+dot-blot-4+fluorescence-1+pathology-2+"
-        "panel-split-1+excel-advanced-4"
+        "generic-image-local-6+western-blot-3+dot-blot-5+fluorescence-2+pathology-3+"
+        "panel-split-4+panel-sift-fallback-2+panel-candidate-budget-1+excel-advanced-4"
     )
     assert result.completed_at is not None
     assert result.performance is not None

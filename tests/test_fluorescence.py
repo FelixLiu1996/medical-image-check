@@ -4,7 +4,10 @@ import cv2
 import numpy as np
 
 from medical_image_check.domain.models import FindingType
-from medical_image_check.engines.fluorescence import FluorescenceDuplicateDetector
+from medical_image_check.engines.fluorescence import (
+    FluorescenceDuplicateDetector,
+    _is_color_fluorescence,
+)
 from medical_image_check.engines.image_similarity import ImageDuplicateDetector
 from medical_image_check.infrastructure.images import decode_image_pages
 
@@ -103,3 +106,12 @@ def test_integrated_scan_does_not_repeat_exact_duplicate_as_fluorescence(
 
     assert any(item.rule_id == "image.file.sha256" for item in findings)
     assert not any(item.rule_id.startswith("image.fluorescence.") for item in findings)
+
+
+def test_auto_fluorescence_gate_rejects_white_composite_layout() -> None:
+    image = np.full((240, 520, 3), 250, dtype=np.uint8)
+    field = _cell_field()
+    image[10:230, 10:270, 1] = cv2.resize(field, (260, 220))
+    image[10:230, 285:510, 0] = cv2.resize(field, (225, 220))
+
+    assert _is_color_fluorescence(image) is False

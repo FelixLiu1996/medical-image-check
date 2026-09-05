@@ -13,6 +13,7 @@ LOCAL_FEATURE_MAX_DIMENSION = 1600
 LOCAL_FEATURE_LIMIT = 1200
 LOCAL_FEATURE_GRID_SIZE = 4
 DETAIL_IMAGE_MAX_PIXELS = 25_000
+VERIFICATION_IMAGE_MAX_DIMENSION = 512
 TRANSFORMS = (
     "identity",
     "rotate_90",
@@ -48,6 +49,8 @@ class ImageFeature:
     layout_background_fraction: float
     mean_colorfulness: float
     detail_image: NDArray[np.uint8] | None
+    verification_image: NDArray[np.uint8]
+    verification_chroma: NDArray[np.uint8]
 
     @property
     def identity_fingerprint(self) -> TransformFingerprint:
@@ -95,6 +98,35 @@ def extract_image_features_from_pages(
             for transform in TRANSFORMS
         )
         height, width = canonical.shape[:2]
+        verification_scale = min(
+            1.0,
+            VERIFICATION_IMAGE_MAX_DIMENSION / max(height, width, 1),
+        )
+        verification_image = (
+            np.ascontiguousarray(gray)
+            if verification_scale >= 1.0
+            else cv2.resize(
+                gray,
+                (
+                    max(1, round(width * verification_scale)),
+                    max(1, round(height * verification_scale)),
+                ),
+                interpolation=cv2.INTER_AREA,
+            )
+        )
+        chroma = np.max(canonical[:, :, :3], axis=2) - np.min(canonical[:, :, :3], axis=2)
+        verification_chroma = (
+            np.ascontiguousarray(chroma, dtype=np.uint8)
+            if verification_scale >= 1.0
+            else cv2.resize(
+                chroma,
+                (
+                    max(1, round(width * verification_scale)),
+                    max(1, round(height * verification_scale)),
+                ),
+                interpolation=cv2.INTER_AREA,
+            ).astype(np.uint8)
+        )
         features.append(
             ImageFeature(
                 source_path=str(source),
@@ -115,6 +147,8 @@ def extract_image_features_from_pages(
                     if gray.size <= DETAIL_IMAGE_MAX_PIXELS and min(gray.shape) >= 16
                     else None
                 ),
+                verification_image=np.ascontiguousarray(verification_image),
+                verification_chroma=np.ascontiguousarray(verification_chroma),
             )
         )
     return tuple(features)

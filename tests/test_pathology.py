@@ -5,7 +5,11 @@ import numpy as np
 
 from medical_image_check.domain.models import FindingType
 from medical_image_check.engines.image_similarity import ImageDuplicateDetector
-from medical_image_check.engines.pathology import PathologyDuplicateDetector
+from medical_image_check.engines.pathology import (
+    PathologyDuplicateDetector,
+    _looks_like_pathology,
+    _stain_invariant_morphology,
+)
 from medical_image_check.infrastructure.images import decode_image_pages
 
 
@@ -99,3 +103,14 @@ def test_integrated_scan_does_not_repeat_exact_duplicate_as_pathology(tmp_path: 
 
     assert any(item.rule_id == "image.file.sha256" for item in findings)
     assert not any(item.rule_id.startswith("image.pathology.") for item in findings)
+
+
+def test_auto_pathology_gate_rejects_white_scientific_layout() -> None:
+    image = np.full((320, 520, 3), 250, dtype=np.uint8)
+    cv2.line(image, (45, 270), (475, 270), (35, 35, 35), 3)
+    cv2.line(image, (45, 40), (45, 270), (35, 35, 35), 3)
+    for index, color in enumerate(((150, 75, 180), (175, 95, 205), (130, 85, 170))):
+        cv2.rectangle(image, (95 + index * 115, 100), (155 + index * 115, 268), color, -1)
+    _, tissue_mask = _stain_invariant_morphology(image)
+
+    assert _looks_like_pathology(image, tissue_mask) is False

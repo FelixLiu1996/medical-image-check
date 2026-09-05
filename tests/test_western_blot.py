@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -9,7 +10,13 @@ from medical_image_check.engines.image_similarity import (
     ImageDuplicateDetector,
     _is_low_coverage_western_local,
 )
-from medical_image_check.engines.western_blot import WesternBlotDuplicateDetector
+from medical_image_check.engines.western_blot import (
+    WesternBand,
+    WesternBlotDuplicateDetector,
+    _auto_match_is_plausible,
+    _best_match,
+    _group_band_rows,
+)
 
 
 def _synthetic_blot(
@@ -175,6 +182,32 @@ def test_sensitive_mode_finds_resized_flipped_short_strip(tmp_path: Path) -> Non
     assert finding.details["strip_fallback"] is True
     assert finding.details["transform_second_to_first"] == "flip_horizontal"
     assert finding.details["horizontal_profile_similarity"] >= 0.90
+
+
+def test_band_row_grouping_does_not_scale_with_full_page_height() -> None:
+    bands = [
+        WesternBand(20, 80, 45, 5, 0.9),
+        WesternBand(95, 98, 45, 5, 0.9),
+    ]
+
+    rows = _group_band_rows(bands, image_height=2400, image_width=500)
+
+    assert len(rows) == 2
+
+
+def test_auto_western_gate_rejects_tall_non_strip_regions(tmp_path: Path) -> None:
+    original = _synthetic_blot(11)
+    reused = np.clip(original.astype(np.float32) * 0.85 + 20, 0, 255).astype(np.uint8)
+    detector = WesternBlotDuplicateDetector()
+    first_regions = detector.extract_from_pages(tmp_path / "first.png", (original,))
+    second_regions = detector.extract_from_pages(tmp_path / "second.png", (reused,))
+    assert first_regions and second_regions
+    match = _best_match(first_regions[0], second_regions[0])
+    assert match is not None
+    first = replace(first_regions[0], region=(0, 0, 80, 120))
+    second = replace(second_regions[0], region=(0, 0, 80, 120))
+
+    assert _auto_match_is_plausible(first, second, match) is False
 
 
 def test_western_mode_rejects_low_coverage_elongated_local_match() -> None:

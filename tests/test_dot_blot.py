@@ -263,10 +263,12 @@ def test_dot_candidate_budget_wiring_and_performance_item_semantics(
         *,
         candidate_pair_limit: int | None,
         per_page_pair_limit: int | None,
+        strict_auto: bool,
     ) -> list[object]:
         del regions, excluded_pairs, checkpoint
         captured["candidate_pair_limit"] = candidate_pair_limit
         captured["per_page_pair_limit"] = per_page_pair_limit
+        captured["strict_auto"] = int(strict_auto)
         assert callable(on_candidate_count)
         on_candidate_count(7)
         return []
@@ -293,6 +295,7 @@ def test_dot_candidate_budget_wiring_and_performance_item_semantics(
     assert captured == {
         "candidate_pair_limit": expected_global_limit,
         "per_page_pair_limit": expected_page_pair_limit,
+        "strict_auto": int(analysis_mode == ImageAnalysisMode.AUTO),
     }
     assert stages["image.dot_blot_candidates"].items == 7
     assert stages["image.dot_blot_verification"].items == 0

@@ -24,6 +24,7 @@ FLUORESCENCE_MAX_DIMENSION = 1400
 FLUORESCENCE_INDEX_BUCKET_LIMIT = 96
 FLUORESCENCE_CANDIDATE_MIN_VOTES = 2
 FLUORESCENCE_HASH_MAX_DISTANCE = 18
+FLUORESCENCE_AUTO_MAX_WHITE_LAYOUT_FRACTION = 0.15
 FLUORESCENCE_TRANSFORMS = (
     "identity",
     "flip_horizontal",
@@ -235,7 +236,13 @@ def _is_color_fluorescence(bgr: NDArray[np.uint8]) -> bool:
     dark_fraction = float(np.mean(maximum <= 55))
     bright_fraction = float(np.mean(maximum >= 110))
     colorful_fraction = float(np.mean((maximum - minimum) >= 24))
-    return dark_fraction >= 0.35 and 0.001 <= bright_fraction <= 0.55 and colorful_fraction >= 0.001
+    white_layout_fraction = float(np.mean((minimum >= 238) & ((maximum - minimum) <= 25)))
+    return (
+        dark_fraction >= 0.35
+        and 0.001 <= bright_fraction <= 0.55
+        and colorful_fraction >= 0.001
+        and white_layout_fraction < FLUORESCENCE_AUTO_MAX_WHITE_LAYOUT_FRACTION
+    )
 
 
 def _signal_quality(plane: NDArray[np.uint8]) -> bool:

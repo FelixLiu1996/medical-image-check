@@ -39,6 +39,10 @@ WESTERN_MAX_SINGLE_BAND_REGIONS = 24
 WESTERN_INDEX_BUCKET_LIMIT = 128
 WESTERN_CANDIDATE_MIN_VOTES = 2
 WESTERN_HASH_MAX_DISTANCE = 20
+WESTERN_AUTO_MIN_REGION_ASPECT_RATIO = 1.20
+WESTERN_AUTO_MAX_BAND_CENTER_SPREAD_FACTOR = 2.0
+WESTERN_AUTO_MIN_BACKGROUND_SIMILARITY = 0.30
+WESTERN_AUTO_MIN_STRUCTURE_WITHOUT_BACKGROUND = 0.97
 WESTERN_TRANSFORMS = (
     "identity",
     "flip_horizontal",
@@ -150,6 +154,8 @@ class WesternBlotDuplicateDetector:
         regions: list[WesternRegion],
         excluded_page_pairs: set[tuple[str, str]] | None = None,
         checkpoint: Callable[[], None] | None = None,
+        *,
+        strict_auto: bool = False,
     ) -> list[Finding]:
         findings: list[Finding] = []
         for candidate_index, (first_index, second_index) in enumerate(
@@ -165,6 +171,8 @@ class WesternBlotDuplicateDetector:
                 continue
             match = _best_match(first, second)
             if match is None:
+                continue
+            if strict_auto and not _auto_match_is_plausible(first, second, match):
                 continue
             locations = (_location(first), _location(second))
             if first.strip_fallback:
@@ -456,7 +464,7 @@ def _group_band_rows(
     if not bands:
         return []
     median_height = float(np.median([band.height for band in bands]))
-    tolerance = max(4.0, median_height * 1.8, image_height * 0.012)
+    tolerance = max(4.0, median_height * 1.8)
     rows: list[list[WesternBand]] = []
     for band in sorted(bands, key=lambda item: (item.center_y, item.center_x)):
         target: list[WesternBand] | None = None
@@ -699,6 +707,31 @@ def _best_match(first: WesternRegion, second: WesternRegion) -> _WesternMatch | 
         if best is None or candidate.confidence > best.confidence:
             best = candidate
     return best
+
+
+def _auto_match_is_plausible(
+    first: WesternRegion,
+    second: WesternRegion,
+    match: _WesternMatch,
+) -> bool:
+    for region in (first, second):
+        _, _, width, height = region.region
+        if not region.single_band and width / max(height, 1) < WESTERN_AUTO_MIN_REGION_ASPECT_RATIO:
+            return False
+        if region.bands:
+            band_heights = [band.height for band in region.bands]
+            center_spread = max(band.center_y for band in region.bands) - min(
+                band.center_y for band in region.bands
+            )
+            if center_spread > max(
+                4.0,
+                float(np.median(band_heights)) * WESTERN_AUTO_MAX_BAND_CENTER_SPREAD_FACTOR,
+            ):
+                return False
+    return (
+        match.background_similarity >= WESTERN_AUTO_MIN_BACKGROUND_SIMILARITY
+        or match.structure_similarity >= WESTERN_AUTO_MIN_STRUCTURE_WITHOUT_BACKGROUND
+    )
 
 
 def _best_strip_match(first: WesternRegion, second: WesternRegion) -> _WesternMatch | None:

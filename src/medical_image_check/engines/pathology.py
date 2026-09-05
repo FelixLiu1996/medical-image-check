@@ -26,6 +26,10 @@ PATHOLOGY_MAX_REGIONS_PER_PAGE = 40
 PATHOLOGY_INDEX_BUCKET_LIMIT = 128
 PATHOLOGY_CANDIDATE_MIN_VOTES = 2
 PATHOLOGY_HASH_MAX_DISTANCE = 20
+PATHOLOGY_AUTO_MAX_WHITE_LAYOUT_FRACTION = 0.55
+PATHOLOGY_AUTO_MAX_DARK_FRACTION = 0.18
+PATHOLOGY_AUTO_COMPACT_MAX_DIMENSION = 160
+PATHOLOGY_AUTO_COMPACT_MAX_ASPECT_RATIO = 1.35
 PATHOLOGY_TRANSFORMS = (
     "identity",
     "flip_horizontal",
@@ -281,8 +285,25 @@ def _stain_invariant_morphology(
 def _looks_like_pathology(bgr: NDArray[np.uint8], tissue_mask: NDArray[np.uint8]) -> bool:
     brightness = np.max(bgr, axis=2)
     background_fraction = float(np.mean(brightness >= 205))
+    white_layout_fraction = float(
+        np.mean((np.min(bgr, axis=2) >= 238) & ((np.max(bgr, axis=2) - np.min(bgr, axis=2)) <= 25))
+    )
+    dark_fraction = float(np.mean(brightness <= 55))
     tissue_fraction = float(np.mean(tissue_mask > 0))
-    if background_fraction < 0.08 or not 0.035 <= tissue_fraction <= 0.94:
+    height, width = bgr.shape[:2]
+    compact_square = (
+        max(height, width) <= PATHOLOGY_AUTO_COMPACT_MAX_DIMENSION
+        and max(height, width) / max(min(height, width), 1)
+        <= PATHOLOGY_AUTO_COMPACT_MAX_ASPECT_RATIO
+    )
+    if (
+        background_fraction < 0.08
+        or (
+            white_layout_fraction >= PATHOLOGY_AUTO_MAX_WHITE_LAYOUT_FRACTION and not compact_square
+        )
+        or dark_fraction >= PATHOLOGY_AUTO_MAX_DARK_FRACTION
+        or not 0.035 <= tissue_fraction <= 0.94
+    ):
         return False
     tissue_pixels = bgr[tissue_mask > 0].astype(np.float32)
     if tissue_pixels.size == 0:

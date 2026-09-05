@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -75,6 +75,7 @@ class ImageDuplicateDetector:
         on_file: Callable[[Path], None] | None = None,
         checkpoint: Callable[[], None] | None = None,
         profiler: PerformanceRecorder | None = None,
+        candidate_source_groups: dict[str, str] | None = None,
     ) -> tuple[list[Finding], list[ScanIssue]]:
         file_hashes: dict[str, list[Path]] = defaultdict(list)
         features: list[ImageFeature] = []
@@ -190,9 +191,12 @@ class ImageDuplicateDetector:
             exact_pairs.update(perceptual_pairs)
         record_items(profiler, "image.perceptual_verification", len(perceptual_findings))
         with profile_stage(profiler, "image.generic_candidate_selection"):
+            horizontal_subset_pairs: set[tuple[int, int]] = set()
             generic_fallback_pairs = _bounded_small_image_candidate_pairs(
                 features,
                 exact_pairs,
+                candidate_source_groups,
+                horizontal_subset_pairs,
             )
         record_items(
             profiler,
@@ -233,6 +237,7 @@ class ImageDuplicateDetector:
                 checkpoint,
                 generic_fallback_pairs,
                 small_content_candidate_counts.append,
+                horizontal_subset_pairs,
             )
             findings.extend(small_content_findings)
         record_items(
@@ -262,6 +267,7 @@ class ImageDuplicateDetector:
                     if self.analysis_mode == ImageAnalysisMode.AUTO
                     else None
                 ),
+                strict_auto=self.analysis_mode == ImageAnalysisMode.AUTO,
             )
             if self.analysis_mode == ImageAnalysisMode.AUTO:
                 dot_blot_findings = [
@@ -299,6 +305,7 @@ class ImageDuplicateDetector:
                 western_regions,
                 source_duplicate_pairs,
                 checkpoint,
+                strict_auto=self.analysis_mode == ImageAnalysisMode.AUTO,
             )
             findings.extend(western_findings)
         record_items(profiler, "image.western_verification", len(western_findings))
@@ -430,7 +437,10 @@ class ImageDuplicateDetector:
             match = _best_match(first, second)
             if match is None:
                 continue
-            if _is_layout_dominant_pair(first, second):
+            if _is_layout_dominant_pair(first, second) or _is_verification_layout_pair(
+                first,
+                second,
+            ):
                 continue
             matched_pairs.add(pair_key)
             transform, phash_distance, dhash_distance, similarity = match
@@ -524,6 +534,7 @@ class ImageDuplicateDetector:
         checkpoint: Callable[[], None] | None = None,
         supplemental_pairs: set[tuple[int, int]] | None = None,
         on_candidate_count: Callable[[int], None] | None = None,
+        horizontal_subset_pairs: set[tuple[int, int]] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
         detail_cache: dict[tuple[int, bool], _SmallDetailFeature] = {}
@@ -549,8 +560,7 @@ class ImageDuplicateDetector:
                 continue
             if first.detail_image is None or second.detail_image is None:
                 continue
-            if _is_small_layout_dominant_pair(first, second):
-                continue
+            layout_dominant = _is_small_layout_dominant_pair(first, second)
             verified_candidate_count += 1
             match = _small_content_match(
                 first_index,
@@ -558,8 +568,19 @@ class ImageDuplicateDetector:
                 first,
                 second,
                 detail_cache,
+                horizontal_subset_enabled=(
+                    horizontal_subset_pairs is not None
+                    and (first_index, second_index) in horizontal_subset_pairs
+                ),
             )
             if match is None:
+                continue
+            if (
+                layout_dominant
+                and match.details.get("verification_method") != "dense_structure_horizontal_subset"
+            ):
+                continue
+            if _small_match_is_rejected(first, second, match):
                 continue
             locations = (_location(first), _location(second))
             risk = RiskLevel.MEDIUM if match.confidence >= 0.86 else RiskLevel.LOW
@@ -606,9 +627,13 @@ LAYOUT_MIN_PIXELS = 30_000
 LAYOUT_MIN_DIMENSION = 96
 LAYOUT_MIN_BACKGROUND_FRACTION = 0.62
 LAYOUT_LOCAL_MIN_COVERAGE = 0.35
+MATCHED_LAYOUT_MIN_BACKGROUND_FRACTION = 0.55
+MATCHED_LAYOUT_MAX_COLORFUL_FRACTION = 0.30
+SMALL_CONTENT_MIN_CONFIDENCE = 0.74
 SMALL_SIFT_MIN_INLIERS = 12
 SMALL_SIFT_MIN_INLIER_RATIO = 0.70
 SMALL_SIFT_MAX_MEDIAN_ERROR = 2.5
+SMALL_SIFT_LOW_COLOR_MAX_MEDIAN_ERROR = 0.35
 SMALL_STRUCTURE_MIN_GRAY_CORRELATION = 0.75
 SMALL_STRUCTURE_MIN_HIGHPASS_CORRELATION = 0.65
 SMALL_STRUCTURE_MIN_GRADIENT_CORRELATION = 0.64
@@ -617,6 +642,33 @@ SMALL_STRUCTURE_SHIFT_LIMIT = 16
 SMALL_STRUCTURE_MAX_COLORFULNESS = 35.0
 SMALL_STRUCTURE_FINE_MAX_DIMENSION = 64
 SMALL_STRUCTURE_FINE_TRIGGER_HIGHPASS = 0.85
+SMALL_STRIP_MIN_ASPECT_RATIO = 6.0
+SMALL_STRIP_MAX_HEIGHT = 160
+SMALL_STRIP_BORDER_TRIM_X = 0.04
+SMALL_STRIP_BORDER_TRIM_Y = 0.20
+SMALL_STRIP_MIN_CONFIDENCE = 0.82
+SMALL_STRIP_MIN_GRAY_CORRELATION = 0.95
+SMALL_STRIP_MIN_HIGHPASS_CORRELATION = 0.78
+SMALL_STRIP_MIN_GRADIENT_CORRELATION = 0.77
+SMALL_STRIP_SUBSET_MIN_ASPECT_RATIO = 3.0
+SMALL_STRIP_SUBSET_MAX_HEIGHT = 96
+SMALL_STRIP_SUBSET_VERTICAL_TRIM = 0.20
+SMALL_STRIP_SUBSET_FRACTIONS = (0.80, 0.75, 2 / 3, 0.60, 0.50)
+SMALL_STRIP_SUBSET_ALIGNMENTS = (0.0, 0.25, 0.50, 0.75, 1.0)
+SMALL_STRIP_SUBSET_MIN_WIDTH = 40
+SMALL_STRIP_SUBSET_MIN_HEIGHT = 10
+SMALL_STRIP_SUBSET_SIZE = 64
+SMALL_STRIP_SUBSET_SHIFT_LIMIT = 8
+SMALL_STRIP_SUBSET_DETAIL_WIDTH = 192
+SMALL_STRIP_SUBSET_DETAIL_HEIGHT = 48
+SMALL_STRIP_SUBSET_DETAIL_SHIFT_X = 12
+SMALL_STRIP_SUBSET_DETAIL_SHIFT_Y = 6
+SMALL_STRIP_SUBSET_MIN_CONFIDENCE = 0.80
+SMALL_STRIP_SUBSET_MIN_GRAY_CORRELATION = 0.94
+SMALL_STRIP_SUBSET_MIN_HIGHPASS_CORRELATION = 0.67
+SMALL_STRIP_SUBSET_MIN_GRADIENT_CORRELATION = 0.85
+SMALL_STRIP_SUBSET_MAX_DETAIL_OFFSET = 6
+SMALL_STRIP_SUBSET_MIN_DETAIL_CORRELATION = 0.88
 SMALL_CANDIDATE_MIN_SHARED_HASH_KEYS = 10
 SMALL_CANDIDATE_PER_FEATURE_LIMIT = 32
 SMALL_CANDIDATE_BUCKET_LIMIT = 64
@@ -626,6 +678,14 @@ GENERIC_FALLBACK_MAX_IMAGE_PIXELS = 60_000
 GENERIC_FALLBACK_MIN_SHARED_HASH_KEYS = 4
 GENERIC_FALLBACK_PAIR_LIMIT = 64
 GENERIC_FALLBACK_PER_FEATURE_LIMIT = 8
+PANEL_SIFT_FALLBACK_MAX_FEATURES = 64
+PANEL_SIFT_FALLBACK_DESCRIPTOR_LIMIT = 384
+PANEL_SIFT_FALLBACK_MIN_MATCHES = 4
+PANEL_SIFT_SOURCE_PAIR_CANDIDATE_LIMIT = 6
+PANEL_SIFT_SOURCE_PAIR_SHORTLIST_LIMIT = 384
+PANEL_STRIP_SUBSET_SOURCE_PAIR_CANDIDATE_LIMIT = 4
+PANEL_STRIP_SUBSET_SHORTLIST_LIMIT = 64
+PANEL_STRIP_SUBSET_PER_FEATURE_LIMIT = 8
 AUTO_DOT_WESTERN_DOMINANT_COVERAGE = 0.35
 AUTO_DOT_WESTERN_DOMINANT_TOTAL_COVERAGE = 0.35
 AUTO_DOT_WESTERN_DOMINANT_UNION_COVERAGE = 0.25
@@ -695,6 +755,19 @@ class _SmallDetailFeature:
 class _SmallContentMatch:
     confidence: float
     details: dict[str, str | int | float]
+
+
+@dataclass(frozen=True, slots=True)
+class _SmallStripWindow:
+    gray: NDArray[np.uint8]
+    detail_gray: NDArray[np.uint8]
+    highpass: NDArray[np.float32]
+    gradient: NDArray[np.float32]
+    x: int
+    y: int
+    width: int
+    height: int
+    retained_fraction: float
 
 
 def _looks_like_western_input(path: Path, pages: tuple[NDArray, ...]) -> bool:
@@ -915,6 +988,15 @@ def _geometric_match(first: ImageFeature, second: ImageFeature) -> _GeometricMat
     ):
         return None
 
+    content_match = _geometric_content_match(
+        first,
+        second,
+        first_region,
+        second_region,
+    )
+    if content_match is None:
+        return None
+
     scale_x, scale_y, rotation = _transform_summary(
         estimate.matrix,
         estimate.model,
@@ -954,8 +1036,116 @@ def _geometric_match(first: ImageFeature, second: ImageFeature) -> _GeometricMat
         "rotation_degrees_second_to_first": round(rotation, 4),
         "first_size": f"{first.width}x{first.height}",
         "second_size": f"{second.width}x{second.height}",
+        "content_transform_second_to_first": content_match.details["transform_second_to_first"],
+        "content_gray_correlation": content_match.details["gray_correlation"],
+        "content_highpass_correlation": content_match.details["highpass_correlation"],
+        "content_gradient_correlation": content_match.details["gradient_correlation"],
     }
     return _GeometricMatch(confidence=round(confidence, 6), details=details)
+
+
+def _geometric_content_match(
+    first: ImageFeature,
+    second: ImageFeature,
+    first_region: tuple[int, int, int, int],
+    second_region: tuple[int, int, int, int],
+) -> _SmallContentMatch | None:
+    first_crop = _verification_crop(first, first_region)
+    second_crop = _verification_crop(second, second_region)
+    if first_crop is None or second_crop is None:
+        return None
+    first_chroma = _verification_crop(first, first_region, chroma=True)
+    second_chroma = _verification_crop(second, second_region, chroma=True)
+    if _is_layout_image(first_crop, first_chroma) and _is_layout_image(
+        second_crop,
+        second_chroma,
+    ):
+        return None
+    return _small_structural_match(first_crop, second_crop)
+
+
+def _verification_crop(
+    feature: ImageFeature,
+    region: tuple[int, int, int, int],
+    *,
+    chroma: bool = False,
+) -> NDArray[np.uint8] | None:
+    image = feature.verification_chroma if chroma else feature.verification_image
+    scale_x = image.shape[1] / max(feature.width, 1)
+    scale_y = image.shape[0] / max(feature.height, 1)
+    x, y, width, height = region
+    left = max(0, min(image.shape[1] - 1, math.floor(x * scale_x)))
+    top = max(0, min(image.shape[0] - 1, math.floor(y * scale_y)))
+    right = max(left + 1, min(image.shape[1], math.ceil((x + width) * scale_x)))
+    bottom = max(top + 1, min(image.shape[0], math.ceil((y + height) * scale_y)))
+    crop = image[top:bottom, left:right]
+    if min(crop.shape[:2]) < 4 or crop.size < 32:
+        return None
+    return np.ascontiguousarray(crop)
+
+
+def _is_layout_image(
+    image: NDArray[np.uint8],
+    chroma: NDArray[np.uint8] | None = None,
+) -> bool:
+    if min(image.shape[:2]) < 12:
+        return False
+    if chroma is not None and float(np.mean(chroma >= 20)) >= MATCHED_LAYOUT_MAX_COLORFUL_FRACTION:
+        return False
+    background = image >= 238
+    if chroma is not None:
+        background &= chroma <= 25
+    return float(np.mean(background)) >= MATCHED_LAYOUT_MIN_BACKGROUND_FRACTION
+
+
+def _is_verification_layout_pair(first: ImageFeature, second: ImageFeature) -> bool:
+    return _is_layout_image(
+        first.verification_image,
+        first.verification_chroma,
+    ) and _is_layout_image(
+        second.verification_image,
+        second.verification_chroma,
+    )
+
+
+def _small_match_is_rejected(
+    first: ImageFeature,
+    second: ImageFeature,
+    match: _SmallContentMatch,
+) -> bool:
+    if first.detail_image is None or second.detail_image is None:
+        return False
+    if match.confidence < SMALL_CONTENT_MIN_CONFIDENCE:
+        return True
+    if match.details.get("verification_method") != "sift_geometry":
+        return False
+    first_region = _details_region(match.details, "first", first.detail_image)
+    second_region = _details_region(match.details, "second", second.detail_image)
+    thin_fragment = min(first_region.shape + second_region.shape) <= 16
+    page_layout = (
+        max(
+            first.layout_background_fraction,
+            second.layout_background_fraction,
+        )
+        >= MATCHED_LAYOUT_MIN_BACKGROUND_FRACTION
+    )
+    return thin_fragment and page_layout
+
+
+def _details_region(
+    details: dict[str, str | int | float],
+    prefix: str,
+    image: NDArray[np.uint8],
+) -> NDArray[np.uint8]:
+    x = int(details.get(f"{prefix}_region_x", 0))
+    y = int(details.get(f"{prefix}_region_y", 0))
+    width = int(details.get(f"{prefix}_region_width", image.shape[1]))
+    height = int(details.get(f"{prefix}_region_height", image.shape[0]))
+    left = max(0, min(image.shape[1] - 1, x))
+    top = max(0, min(image.shape[0] - 1, y))
+    right = max(left + 1, min(image.shape[1], x + width))
+    bottom = max(top + 1, min(image.shape[0], y + height))
+    return image[top:bottom, left:right]
 
 
 def _small_content_match(
@@ -964,6 +1154,7 @@ def _small_content_match(
     first: ImageFeature,
     second: ImageFeature,
     cache: dict[tuple[int, bool], _SmallDetailFeature],
+    horizontal_subset_enabled: bool = False,
 ) -> _SmallContentMatch | None:
     structural = (
         _small_structural_match(first.detail_image, second.detail_image)
@@ -971,12 +1162,330 @@ def _small_content_match(
         <= SMALL_STRUCTURE_MAX_COLORFULNESS
         else None
     )
+    border_trimmed = (
+        _small_elongated_border_match(first.detail_image, second.detail_image)
+        if structural is None
+        and max(first.mean_colorfulness, second.mean_colorfulness)
+        <= SMALL_STRUCTURE_MAX_COLORFULNESS
+        else None
+    )
     sift = _small_sift_match(first_index, second_index, first, second, cache)
-    if structural is None and sift is None:
+    dense = structural or border_trimmed
+    subset = (
+        _small_horizontal_subset_match(first.detail_image, second.detail_image)
+        if horizontal_subset_enabled
+        and dense is None
+        and sift is None
+        and max(first.mean_colorfulness, second.mean_colorfulness)
+        <= SMALL_STRUCTURE_MAX_COLORFULNESS
+        else None
+    )
+    if dense is None and sift is None and subset is None:
         return None
-    if sift is not None and (structural is None or sift.confidence >= structural.confidence):
+    if sift is not None and (dense is None or sift.confidence >= dense.confidence):
         return sift
-    return structural
+    return dense or subset
+
+
+def _small_elongated_border_match(
+    first: NDArray[np.uint8] | None,
+    second: NDArray[np.uint8] | None,
+) -> _SmallContentMatch | None:
+    """Recover the same elongated strip despite different frame/margin thickness.
+
+    This is deliberately narrower than generic partial matching: both inputs must
+    remain long, low-height strips and the central content must pass stronger
+    dense-structure thresholds after a fixed symmetric trim. It does not compare
+    individual bands or search arbitrary horizontal subregions.
+    """
+
+    if first is None or second is None:
+        return None
+    for image in (first, second):
+        height, width = image.shape[:2]
+        if height > SMALL_STRIP_MAX_HEIGHT or width / max(height, 1) < SMALL_STRIP_MIN_ASPECT_RATIO:
+            return None
+
+    first_trimmed, first_region = _trim_small_strip_border(first)
+    second_trimmed, second_region = _trim_small_strip_border(second)
+    match = _small_structural_match(first_trimmed, second_trimmed)
+    if match is None:
+        return None
+    details = match.details
+    if (
+        match.confidence < SMALL_STRIP_MIN_CONFIDENCE
+        or float(details.get("gray_correlation", 0.0)) < SMALL_STRIP_MIN_GRAY_CORRELATION
+        or float(details.get("highpass_correlation", 0.0)) < SMALL_STRIP_MIN_HIGHPASS_CORRELATION
+        or float(details.get("gradient_correlation", 0.0)) < SMALL_STRIP_MIN_GRADIENT_CORRELATION
+        or details.get("transform_second_to_first") not in {"identity", "flip_horizontal"}
+    ):
+        return None
+    return _SmallContentMatch(
+        confidence=match.confidence,
+        details={
+            **details,
+            "verification_method": "dense_structure_border_trim",
+            "first_region_x": first_region[0],
+            "first_region_y": first_region[1],
+            "first_region_width": first_region[2],
+            "first_region_height": first_region[3],
+            "second_region_x": second_region[0],
+            "second_region_y": second_region[1],
+            "second_region_width": second_region[2],
+            "second_region_height": second_region[3],
+        },
+    )
+
+
+def _trim_small_strip_border(
+    image: NDArray[np.uint8],
+) -> tuple[NDArray[np.uint8], tuple[int, int, int, int]]:
+    height, width = image.shape[:2]
+    trim_x = max(1, round(width * SMALL_STRIP_BORDER_TRIM_X))
+    trim_y = max(1, round(height * SMALL_STRIP_BORDER_TRIM_Y))
+    left = min(trim_x, max(0, width // 2 - 2))
+    top = min(trim_y, max(0, height // 2 - 2))
+    right = max(left + 4, width - left)
+    bottom = max(top + 4, height - top)
+    return (
+        np.ascontiguousarray(image[top:bottom, left:right]),
+        (left, top, right - left, bottom - top),
+    )
+
+
+def _small_horizontal_subset_match(
+    first: NDArray[np.uint8] | None,
+    second: NDArray[np.uint8] | None,
+) -> _SmallContentMatch | None:
+    """Compare bounded multi-lane horizontal subsets of two short strip rows."""
+
+    if first is None or second is None:
+        return None
+    for image in (first, second):
+        height, width = image.shape[:2]
+        if (
+            height > SMALL_STRIP_SUBSET_MAX_HEIGHT
+            or width / max(height, 1) < SMALL_STRIP_SUBSET_MIN_ASPECT_RATIO
+            or _small_strip_band_component_count(image) < 2
+        ):
+            return None
+
+    first_windows = _small_strip_subset_windows(first)
+    second_windows = _small_strip_subset_windows(second)
+    best: _SmallContentMatch | None = None
+    for first_window in first_windows:
+        for second_window in second_windows:
+            smaller_fraction = min(
+                first_window.retained_fraction,
+                second_window.retained_fraction,
+            )
+            larger_fraction = max(
+                first_window.retained_fraction,
+                second_window.retained_fraction,
+            )
+            if (
+                smaller_fraction > 0.60
+                or larger_fraction < 2 / 3
+                or larger_fraction / smaller_fraction > 1.60
+            ):
+                continue
+            match = _small_strip_subset_window_match(first_window, second_window)
+            if match is None or (best is not None and match.confidence <= best.confidence):
+                continue
+            best = match
+    return best
+
+
+def _small_strip_subset_windows(image: NDArray[np.uint8]) -> tuple[_SmallStripWindow, ...]:
+    height, width = image.shape[:2]
+    trim_y = min(
+        round(height * SMALL_STRIP_SUBSET_VERTICAL_TRIM),
+        max(0, (height - SMALL_STRIP_SUBSET_MIN_HEIGHT) // 2),
+    )
+    window_height = height - 2 * trim_y
+    windows: list[_SmallStripWindow] = []
+    seen: set[tuple[int, int]] = set()
+    for fraction in SMALL_STRIP_SUBSET_FRACTIONS:
+        window_width = round(width * fraction)
+        if window_width < SMALL_STRIP_SUBSET_MIN_WIDTH:
+            continue
+        for alignment in SMALL_STRIP_SUBSET_ALIGNMENTS:
+            x = round((width - window_width) * alignment)
+            key = (x, window_width)
+            if key in seen:
+                continue
+            seen.add(key)
+            crop = np.ascontiguousarray(
+                image[trim_y : trim_y + window_height, x : x + window_width]
+            )
+            resized = cv2.resize(
+                crop,
+                (SMALL_STRIP_SUBSET_SIZE, SMALL_STRIP_SUBSET_SIZE),
+                interpolation=cv2.INTER_CUBIC,
+            )
+            values = resized.astype(np.float32)
+            highpass = values - cv2.GaussianBlur(values, (0, 0), 1.5)
+            windows.append(
+                _SmallStripWindow(
+                    gray=resized,
+                    detail_gray=cv2.resize(
+                        crop,
+                        (
+                            SMALL_STRIP_SUBSET_DETAIL_WIDTH,
+                            SMALL_STRIP_SUBSET_DETAIL_HEIGHT,
+                        ),
+                        interpolation=cv2.INTER_CUBIC,
+                    ),
+                    highpass=highpass,
+                    gradient=_gradient_magnitude(resized),
+                    x=x,
+                    y=trim_y,
+                    width=window_width,
+                    height=window_height,
+                    retained_fraction=fraction,
+                )
+            )
+    return tuple(windows)
+
+
+def _small_strip_subset_window_match(
+    first: _SmallStripWindow,
+    second: _SmallStripWindow,
+) -> _SmallContentMatch | None:
+    size = SMALL_STRIP_SUBSET_SIZE
+    shift = SMALL_STRIP_SUBSET_SHIFT_LIMIT
+    inner = np.s_[shift : size - shift, shift : size - shift]
+    best: tuple[float, float, float, str, int, int] | None = None
+    for transform in ("identity", "flip_horizontal"):
+        second_gray = _small_transform(second.gray, transform)
+        second_highpass = _small_transform(second.highpass, transform)
+        second_gradient = _small_transform(second.gradient, transform)
+        gray_map = cv2.matchTemplate(second_gray, first.gray[inner], cv2.TM_CCOEFF_NORMED)
+        highpass_map = cv2.matchTemplate(
+            second_highpass,
+            first.highpass[inner],
+            cv2.TM_CCOEFF_NORMED,
+        )
+        gradient_map = cv2.matchTemplate(
+            second_gradient,
+            first.gradient[inner],
+            cv2.TM_CCOEFF_NORMED,
+        )
+        score_map = 0.20 * gray_map + 0.45 * highpass_map + 0.35 * gradient_map
+        _, _, _, best_location = cv2.minMaxLoc(score_map)
+        location_x, location_y = best_location
+        candidate = (
+            float(gray_map[location_y, location_x]),
+            float(highpass_map[location_y, location_x]),
+            float(gradient_map[location_y, location_x]),
+            transform,
+            shift - location_x,
+            shift - location_y,
+        )
+        if best is None or _small_structure_score(candidate) > _small_structure_score(best):
+            best = candidate
+    if best is None:
+        return None
+    gray, highpass, gradient, transform, offset_x, offset_y = best
+    detail_inner = np.s_[
+        SMALL_STRIP_SUBSET_DETAIL_SHIFT_Y : (
+            SMALL_STRIP_SUBSET_DETAIL_HEIGHT - SMALL_STRIP_SUBSET_DETAIL_SHIFT_Y
+        ),
+        SMALL_STRIP_SUBSET_DETAIL_SHIFT_X : (
+            SMALL_STRIP_SUBSET_DETAIL_WIDTH - SMALL_STRIP_SUBSET_DETAIL_SHIFT_X
+        ),
+    ]
+    first_detail = _two_way_residual(first.detail_gray)
+    second_detail = _two_way_residual(_small_transform(second.detail_gray, transform))
+    detail_map = cv2.matchTemplate(
+        second_detail,
+        first_detail[detail_inner],
+        cv2.TM_CCOEFF_NORMED,
+    )
+    _, detail_correlation, _, _ = cv2.minMaxLoc(detail_map)
+    confidence = max(
+        0.0,
+        min(1.0, 0.20 * max(gray, 0.0) + 0.45 * highpass + 0.35 * gradient),
+    )
+    if (
+        confidence < SMALL_STRIP_SUBSET_MIN_CONFIDENCE
+        or gray < SMALL_STRIP_SUBSET_MIN_GRAY_CORRELATION
+        or highpass < SMALL_STRIP_SUBSET_MIN_HIGHPASS_CORRELATION
+        or gradient < SMALL_STRIP_SUBSET_MIN_GRADIENT_CORRELATION
+        or abs(offset_x) > SMALL_STRIP_SUBSET_MAX_DETAIL_OFFSET
+        or abs(offset_y) > SMALL_STRIP_SUBSET_MAX_DETAIL_OFFSET
+        or detail_correlation < SMALL_STRIP_SUBSET_MIN_DETAIL_CORRELATION
+    ):
+        return None
+    return _SmallContentMatch(
+        confidence=round(confidence, 6),
+        details={
+            "evidence_kind": "small_region_content",
+            "verification_method": "dense_structure_horizontal_subset",
+            "transform_second_to_first": transform,
+            "gray_correlation": round(gray, 6),
+            "highpass_correlation": round(highpass, 6),
+            "gradient_correlation": round(gradient, 6),
+            "detail_residual_correlation_at_192x48": round(detail_correlation, 6),
+            "offset_x_at_64": offset_x,
+            "offset_y_at_64": offset_y,
+            "first_region_x": first.x,
+            "first_region_y": first.y,
+            "first_region_width": first.width,
+            "first_region_height": first.height,
+            "second_region_x": second.x,
+            "second_region_y": second.y,
+            "second_region_width": second.width,
+            "second_region_height": second.height,
+            "first_retained_width_fraction": round(first.retained_fraction, 6),
+            "second_retained_width_fraction": round(second.retained_fraction, 6),
+        },
+    )
+
+
+def _two_way_residual(image: NDArray) -> NDArray[np.float32]:
+    """Remove row/column layout so strip verification depends on local detail."""
+
+    values = image.astype(np.float32)
+    return np.asarray(
+        values
+        - np.mean(values, axis=0, keepdims=True)
+        - np.mean(values, axis=1, keepdims=True)
+        + float(np.mean(values)),
+        dtype=np.float32,
+    )
+
+
+def _small_strip_band_component_count(image: NDArray[np.uint8]) -> int:
+    height = image.shape[0]
+    trim_y = min(
+        round(height * SMALL_STRIP_SUBSET_VERTICAL_TRIM),
+        max(0, (height - SMALL_STRIP_SUBSET_MIN_HEIGHT) // 2),
+    )
+    core = image[trim_y : height - trim_y]
+    if core.size == 0:
+        return 0
+    threshold = float(np.median(core)) - 0.45 * float(np.std(core))
+    foreground = np.asarray(core < threshold, dtype=np.uint8) * 255
+    foreground = cv2.morphologyEx(
+        foreground,
+        cv2.MORPH_OPEN,
+        np.ones((2, 2), dtype=np.uint8),
+    )
+    _, _, statistics, _ = cv2.connectedComponentsWithStats(foreground, connectivity=8)
+    minimum_area = max(4, round(core.size * 0.004))
+    count = 0
+    for x, y, component_width, component_height, area in statistics[1:]:
+        del x, y
+        if (
+            area < minimum_area
+            or component_width < 3
+            or component_height < 2
+            or (component_width <= 4 and component_height >= 0.80 * core.shape[0])
+        ):
+            continue
+        count += 1
+    return count
 
 
 def _small_structural_match(
@@ -1275,10 +1784,15 @@ def _small_sift_match(
     if best is None:
         return None
     estimate, match_count, inlier_ratio, flipped, first_points, second_points = best
+    maximum_median_error = (
+        SMALL_SIFT_LOW_COLOR_MAX_MEDIAN_ERROR
+        if max(first.mean_colorfulness, second.mean_colorfulness) <= 8.0
+        else SMALL_SIFT_MAX_MEDIAN_ERROR
+    )
     if (
         estimate.inlier_count < SMALL_SIFT_MIN_INLIERS
         or inlier_ratio < SMALL_SIFT_MIN_INLIER_RATIO
-        or estimate.median_error > SMALL_SIFT_MAX_MEDIAN_ERROR
+        or estimate.median_error > maximum_median_error
     ):
         return None
     confidence = max(
@@ -1667,6 +2181,8 @@ def _eligible_feature_index_pairs(
 def _bounded_small_image_candidate_pairs(
     features: list[ImageFeature],
     excluded_pairs: set[tuple[str, str]],
+    candidate_source_groups: dict[str, str] | None = None,
+    horizontal_subset_pairs: set[tuple[int, int]] | None = None,
 ) -> set[tuple[int, int]]:
     """Recover small transformed crops missed by the primary candidate indexes.
 
@@ -1677,6 +2193,7 @@ def _bounded_small_image_candidate_pairs(
 
     index: dict[tuple[str, int, int], list[int]] = defaultdict(list)
     votes: dict[tuple[int, int], int] = defaultdict(int)
+    panel_votes: dict[tuple[int, int], int] = defaultdict(int)
     for feature_index, feature in enumerate(features):
         if (
             feature.width * feature.height > GENERIC_FALLBACK_MAX_IMAGE_PIXELS
@@ -1692,14 +2209,16 @@ def _bounded_small_image_candidate_pairs(
             bucket = index[key]
             for previous in bucket:
                 first = features[previous]
-                if not _fallback_aspect_compatible(first, feature):
-                    continue
                 pair_key = _feature_pair_key(
                     first.source_path,
                     first.page,
                     feature.source_path,
                     feature.page,
                 )
+                if candidate_source_groups is not None and pair_key not in excluded_pairs:
+                    panel_votes[(previous, feature_index)] += 1
+                if not _fallback_aspect_compatible(first, feature):
+                    continue
                 if pair_key not in excluded_pairs:
                     votes[(previous, feature_index)] += 1
             if len(bucket) < SMALL_CANDIDATE_BUCKET_LIMIT:
@@ -1715,6 +2234,185 @@ def _bounded_small_image_candidate_pairs(
         ),
         key=lambda item: (-item[0], item[1]),
     )
+    selected = _select_ranked_pairs(
+        eligible,
+        pair_limit=GENERIC_FALLBACK_PAIR_LIMIT,
+        per_feature_limit=GENERIC_FALLBACK_PER_FEATURE_LIMIT,
+    )
+    if candidate_source_groups is None:
+        return selected
+
+    panel_eligible = sorted(
+        (
+            (vote_count, pair)
+            for pair, vote_count in panel_votes.items()
+            if vote_count >= SMALL_CANDIDATE_MIN_SHARED_HASH_KEYS
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    strip_subset_shortlist = set(
+        _panel_strip_subset_shortlist(features, panel_eligible, candidate_source_groups)
+    )
+    selected.update(strip_subset_shortlist)
+    if horizontal_subset_pairs is not None:
+        horizontal_subset_pairs.update(strip_subset_shortlist)
+    if len(features) <= PANEL_SIFT_FALLBACK_MAX_FEATURES:
+        selected.update(
+            _sift_ranked_candidate_pairs(
+                features,
+                (pair for _, pair in eligible),
+            )
+        )
+    else:
+        selected.update(
+            _sift_ranked_candidate_pairs(
+                features,
+                _panel_source_pair_shortlist(
+                    features,
+                    panel_eligible,
+                    candidate_source_groups,
+                ),
+            )
+        )
+    return selected
+
+
+def _panel_strip_subset_shortlist(
+    features: list[ImageFeature],
+    eligible: Iterable[tuple[int, tuple[int, int]]],
+    candidate_source_groups: dict[str, str],
+) -> tuple[tuple[int, int], ...]:
+    """Preserve a few cross-Figure strip pairs for bounded subset verification."""
+
+    strip_features = {
+        index for index, feature in enumerate(features) if _is_small_strip_subset_feature(feature)
+    }
+    grouped: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for _, pair in eligible:
+        first_index, second_index = pair
+        if first_index not in strip_features or second_index not in strip_features:
+            continue
+        first_group = candidate_source_groups.get(
+            str(Path(features[first_index].source_path).resolve()),
+            str(Path(features[first_index].source_path).resolve()),
+        )
+        second_group = candidate_source_groups.get(
+            str(Path(features[second_index].source_path).resolve()),
+            str(Path(features[second_index].source_path).resolve()),
+        )
+        if first_group == second_group:
+            continue
+        group_pair = tuple(sorted((first_group, second_group)))
+        group = grouped.setdefault(group_pair, [])
+        if len(group) < PANEL_STRIP_SUBSET_SOURCE_PAIR_CANDIDATE_LIMIT:
+            group.append(pair)
+
+    shortlist: list[tuple[int, int]] = []
+    feature_counts: Counter[int] = Counter()
+    groups = tuple(grouped.values())
+    for rank in range(PANEL_STRIP_SUBSET_SOURCE_PAIR_CANDIDATE_LIMIT):
+        for group in groups:
+            if rank >= len(group):
+                continue
+            pair = group[rank]
+            if any(feature_counts[index] >= PANEL_STRIP_SUBSET_PER_FEATURE_LIMIT for index in pair):
+                continue
+            shortlist.append(pair)
+            feature_counts.update(pair)
+            if len(shortlist) >= PANEL_STRIP_SUBSET_SHORTLIST_LIMIT:
+                return tuple(shortlist)
+    return tuple(shortlist)
+
+
+def _is_small_strip_subset_feature(feature: ImageFeature) -> bool:
+    image = feature.detail_image
+    return (
+        image is not None
+        and feature.mean_colorfulness <= SMALL_STRUCTURE_MAX_COLORFULNESS
+        and feature.height <= SMALL_STRIP_SUBSET_MAX_HEIGHT
+        and feature.width / max(feature.height, 1) >= SMALL_STRIP_SUBSET_MIN_ASPECT_RATIO
+        and _small_strip_band_component_count(image) >= 2
+    )
+
+
+def _panel_source_pair_shortlist(
+    features: list[ImageFeature],
+    eligible: Iterable[tuple[int, tuple[int, int]]],
+    candidate_source_groups: dict[str, str],
+) -> tuple[tuple[int, int], ...]:
+    """Bound Panel SIFT work while preserving candidates across original Figures."""
+
+    grouped: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for _, pair in eligible:
+        first_index, second_index = pair
+        first_group = candidate_source_groups.get(
+            str(Path(features[first_index].source_path).resolve()),
+            str(Path(features[first_index].source_path).resolve()),
+        )
+        second_group = candidate_source_groups.get(
+            str(Path(features[second_index].source_path).resolve()),
+            str(Path(features[second_index].source_path).resolve()),
+        )
+        if first_group == second_group:
+            continue
+        group_pair = tuple(sorted((first_group, second_group)))
+        group = grouped.setdefault(group_pair, [])
+        if len(group) < PANEL_SIFT_SOURCE_PAIR_CANDIDATE_LIMIT:
+            group.append(pair)
+
+    shortlist: list[tuple[int, int]] = []
+    groups = tuple(grouped.values())
+    for rank in range(PANEL_SIFT_SOURCE_PAIR_CANDIDATE_LIMIT):
+        for group in groups:
+            if rank >= len(group):
+                continue
+            shortlist.append(group[rank])
+            if len(shortlist) >= PANEL_SIFT_SOURCE_PAIR_SHORTLIST_LIMIT:
+                return tuple(shortlist)
+    return tuple(shortlist)
+
+
+def _sift_ranked_candidate_pairs(
+    features: list[ImageFeature],
+    candidates: Iterable[tuple[int, int]],
+) -> set[tuple[int, int]]:
+    """Rerank a bounded Panel shortlist using the verifier's SIFT evidence."""
+
+    detail_cache: dict[tuple[int, bool], _SmallDetailFeature] = {}
+    matcher = cv2.BFMatcher(cv2.NORM_L2)
+    eligible: list[tuple[int, tuple[int, int]]] = []
+    for first_index, second_index in candidates:
+        first = _cached_small_detail(
+            first_index,
+            features[first_index],
+            False,
+            detail_cache,
+        ).descriptors[:PANEL_SIFT_FALLBACK_DESCRIPTOR_LIMIT]
+        second = _cached_small_detail(
+            second_index,
+            features[second_index],
+            False,
+            detail_cache,
+        ).descriptors[:PANEL_SIFT_FALLBACK_DESCRIPTOR_LIMIT]
+        second_flipped = _cached_small_detail(
+            second_index,
+            features[second_index],
+            True,
+            detail_cache,
+        ).descriptors[:PANEL_SIFT_FALLBACK_DESCRIPTOR_LIMIT]
+        if len(first) < 2:
+            continue
+        match_counts = [
+            len(_ratio_matches_float(matcher, first, candidate))
+            for candidate in (second, second_flipped)
+            if len(candidate) >= 2
+        ]
+        if not match_counts:
+            continue
+        match_count = max(match_counts)
+        if match_count >= PANEL_SIFT_FALLBACK_MIN_MATCHES:
+            eligible.append((match_count, (first_index, second_index)))
+    eligible.sort(key=lambda item: (-item[0], item[1]))
     return _select_ranked_pairs(
         eligible,
         pair_limit=GENERIC_FALLBACK_PAIR_LIMIT,

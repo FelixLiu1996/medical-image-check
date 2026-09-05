@@ -14,10 +14,15 @@ from medical_image_check.engines.image_similarity import (
     _bounded_small_image_candidate_pairs,
     _feature_pair_key,
     _is_layout_dominant_pair,
+    _is_layout_image,
     _local_candidate_pairs,
+    _panel_source_pair_shortlist,
+    _panel_strip_subset_shortlist,
     _select_ranked_pairs,
+    _sift_ranked_candidate_pairs,
     _small_candidate_pairs,
     _small_content_match,
+    _small_horizontal_subset_match,
     _small_structural_match,
 )
 from medical_image_check.infrastructure.images import (
@@ -185,6 +190,15 @@ def test_detector_finds_rotated_rescaled_crop_with_geometric_evidence(tmp_path: 
     assert local[0].details["first_region_width"] > 0
     assert local[0].details["second_region_height"] > 0
     assert abs(local[0].details["rotation_degrees_second_to_first"]) >= 80
+    assert local[0].details["content_transform_second_to_first"] in {
+        "identity",
+        "rotate_90",
+        "rotate_180",
+        "rotate_270",
+        "flip_horizontal",
+        "flip_vertical",
+    }
+    assert local[0].details["content_gray_correlation"] >= 0.75
 
 
 def test_detector_does_not_report_unrelated_local_images(tmp_path: Path) -> None:
@@ -299,8 +313,15 @@ def test_generic_performance_keeps_result_and_candidate_counts_separate(
         checkpoint: object,
         supplemental_pairs: object,
         on_candidate_count: object,
+        horizontal_subset_pairs: object,
     ) -> list[object]:
-        del features, excluded_pairs, checkpoint, supplemental_pairs
+        del (
+            features,
+            excluded_pairs,
+            checkpoint,
+            supplemental_pairs,
+            horizontal_subset_pairs,
+        )
         assert callable(on_candidate_count)
         on_candidate_count(3)
         return []
@@ -478,6 +499,79 @@ def test_ranked_pair_selection_without_global_limit_keeps_score_order_budgeting(
     assert selected == {(0, 1), (3, 4)}
 
 
+def test_panel_source_pair_shortlist_preserves_deeper_candidates_per_figure_pair() -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+    features = [replace(template, source_path=f"panel-{index:02d}.png") for index in range(16)]
+    source_groups = {
+        str(Path(f"panel-{index:02d}.png").resolve()): (
+            "figure-a.png" if index < 8 else "figure-b.png"
+        )
+        for index in range(16)
+    }
+    eligible = [
+        (110, (0, 1)),
+        *((100 - index, (index, index + 8)) for index in range(8)),
+    ]
+
+    shortlist = _panel_source_pair_shortlist(features, eligible, source_groups)
+
+    assert shortlist == tuple((index, index + 8) for index in range(6))
+
+
+def test_panel_strip_subset_shortlist_is_cross_figure_and_bounded() -> None:
+    strip = np.full((32, 150), 230, dtype=np.uint8)
+    for center in (25, 75, 125):
+        cv2.ellipse(strip, (center, 16), (18, 4), 0, 0, 360, 55, -1)
+    template = extract_image_features_from_pages("template.png", (strip,))[0]
+    features = [replace(template, source_path=f"panel-{index:02d}.png") for index in range(10)]
+    source_groups = {
+        str(Path(f"panel-{index:02d}.png").resolve()): (
+            "figure-a.png" if index < 5 else "figure-b.png"
+        )
+        for index in range(10)
+    }
+    eligible = [
+        (30, (0, 1)),
+        *((20 - index, (index, index + 5)) for index in range(5)),
+    ]
+
+    shortlist = _panel_strip_subset_shortlist(features, eligible, source_groups)
+
+    assert shortlist == tuple((index, index + 5) for index in range(4))
+
+
+def test_large_panel_batch_adds_bounded_cross_figure_sift_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = _synthetic_image()
+    template = extract_image_features_from_pages("template.png", (image,))[0]
+    features = [replace(template, source_path=f"panel-{index:03d}.png") for index in range(140)]
+    source_groups = {
+        str(Path(f"panel-{index:03d}.png").resolve()): (
+            "figure-a.png" if index < 70 else "figure-b.png"
+        )
+        for index in range(140)
+    }
+    inspected: list[tuple[int, int]] = []
+
+    def fake_sift_rank(unused_features: list[object], candidates: object) -> set[tuple[int, int]]:
+        del unused_features
+        inspected.extend(candidates)  # type: ignore[arg-type]
+        return {inspected[-1]}
+
+    monkeypatch.setattr(
+        "medical_image_check.engines.image_similarity._sift_ranked_candidate_pairs",
+        fake_sift_rank,
+    )
+
+    selected = _bounded_small_image_candidate_pairs(features, set(), source_groups)
+
+    assert len(inspected) == 6
+    assert all(first < 70 <= second for first, second in inspected)
+    assert inspected[-1] in selected
+
+
 def test_detector_suppresses_white_background_scientific_layout_matches(
     tmp_path: Path,
 ) -> None:
@@ -507,6 +601,16 @@ def test_detector_suppresses_white_background_scientific_layout_matches(
     )
 
 
+def test_layout_classifier_preserves_colorful_tissue_on_white_background() -> None:
+    gray = np.full((120, 160), 250, dtype=np.uint8)
+    chroma = np.zeros_like(gray)
+    gray[24:104, 32:128] = 160
+    chroma[24:104, 32:128] = 70
+
+    assert float(np.mean(gray >= 238)) >= 0.55
+    assert _is_layout_image(gray, chroma) is False
+
+
 def test_small_structural_match_finds_shifted_low_texture_strip() -> None:
     x = np.linspace(-1.0, 1.0, 112, dtype=np.float32)
     y = np.linspace(-1.0, 1.0, 44, dtype=np.float32)[:, None]
@@ -528,6 +632,168 @@ def test_small_structural_match_finds_shifted_low_texture_strip() -> None:
     assert match.details["gradient_correlation"] >= 0.65
 
 
+def test_small_content_match_ignores_symmetric_frame_difference_for_long_strip() -> None:
+    x = np.linspace(-1.0, 1.0, 300, dtype=np.float32)
+    row = np.full((25, 300), 210, dtype=np.float32)
+    for center, width, strength in zip(
+        (-0.82, -0.60, -0.38, -0.16, 0.06, 0.28, 0.50, 0.72, 0.90),
+        (0.12, 0.13, 0.11, 0.14, 0.12, 0.10, 0.13, 0.11, 0.10),
+        (120, 95, 110, 85, 105, 92, 115, 88, 108),
+        strict=True,
+    ):
+        row -= strength * np.exp(-(((x - center) / width) ** 2))[None, :]
+    row += 4 * np.sin(np.arange(300, dtype=np.float32) / 11)[None, :]
+    first_image = np.pad(np.clip(row, 0, 255).astype(np.uint8), ((5, 5), (5, 5)))
+    second_content = cv2.convertScaleAbs(row, alpha=0.82, beta=28)
+    second_image = np.pad(second_content, ((9, 9), (3, 3)), constant_values=235)
+    cv2.rectangle(first_image, (0, 0), (first_image.shape[1] - 1, first_image.shape[0] - 1), 45, 2)
+    cv2.rectangle(
+        second_image,
+        (0, 0),
+        (second_image.shape[1] - 1, second_image.shape[0] - 1),
+        70,
+        2,
+    )
+    first = extract_image_features_from_pages(Path("first-strip.png"), (first_image,))[0]
+    second = extract_image_features_from_pages(Path("second-strip.png"), (second_image,))[0]
+
+    match = _small_content_match(0, 1, first, second, {})
+
+    assert match is not None
+    assert match.details["verification_method"] == "dense_structure_border_trim"
+    assert match.details["gray_correlation"] >= 0.95
+    assert match.details["highpass_correlation"] >= 0.78
+    assert match.details["gradient_correlation"] >= 0.77
+
+
+def test_small_horizontal_subset_match_finds_reused_contiguous_lane_group() -> None:
+    height = 32
+    lane_width = 50
+
+    def lane(seed: int) -> np.ndarray:
+        random = np.random.default_rng(seed)
+        image = random.normal(225, 3, size=(height, lane_width)).astype(np.float32)
+        x = np.arange(lane_width, dtype=np.float32)[None, :]
+        y = np.arange(height, dtype=np.float32)[:, None]
+        center_x = 25 + random.uniform(-3, 3)
+        center_y = 16 + random.uniform(-1, 1)
+        band = np.exp(-(((y - center_y) / 3.2) ** 2)) * np.exp(-(((x - center_x) / 18) ** 6))
+        image -= random.uniform(115, 155) * band
+        return np.clip(image, 0, 255).astype(np.uint8)
+
+    shared = [lane(1), lane(2)]
+    first = np.hstack([lane(8), *shared])
+    second = np.hstack([lane(9), *shared, lane(10)])
+    second = cv2.convertScaleAbs(second, alpha=0.9, beta=17)
+
+    match = _small_horizontal_subset_match(first, second)
+
+    assert match is not None
+    assert match.details["verification_method"] == "dense_structure_horizontal_subset"
+    assert match.details["first_region_x"] == lane_width
+    assert match.details["first_region_width"] == 2 * lane_width
+    assert match.details["second_region_x"] == lane_width
+    assert match.details["second_region_width"] == 2 * lane_width
+    assert match.details["detail_residual_correlation_at_192x48"] >= 0.88
+    assert abs(match.details["offset_x_at_64"]) <= 6
+    assert abs(match.details["offset_y_at_64"]) <= 6
+
+
+def test_small_horizontal_subset_match_rejects_single_band_comparison() -> None:
+    first = np.full((32, 120), 230, dtype=np.uint8)
+    second = np.full((32, 160), 230, dtype=np.uint8)
+    cv2.ellipse(first, (80, 16), (22, 4), 0, 0, 360, 60, -1)
+    cv2.ellipse(second, (70, 16), (28, 4), 0, 0, 360, 70, -1)
+
+    assert _small_horizontal_subset_match(first, second) is None
+
+
+def test_small_horizontal_subset_match_rejects_shared_lane_layout_without_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    height = 32
+    lane_width = 40
+
+    def strip(seed: int, phase: float) -> np.ndarray:
+        random = np.random.default_rng(seed)
+        image = random.normal(225, 0.5, size=(height, lane_width * 4)).astype(np.float32)
+        y, x = np.mgrid[:height, :lane_width]
+        for lane_index in range(4):
+            center_x = 20 + (-1) ** lane_index
+            band = np.exp(-(((y - 16) / 3.0) ** 2)) * np.exp(-(((x - center_x) / 12) ** 6))
+            local_detail = 1 + 0.05 * np.sin((x + phase + lane_index * 2) / 2.2)
+            local_detail += 0.0275 * np.sin((2 * y + x + phase) / 2.8)
+            image[:, lane_index * lane_width : (lane_index + 1) * lane_width] -= (
+                (118 + lane_index * 3) * band * local_detail
+            )
+        return np.clip(image, 0, 255).astype(np.uint8)
+
+    first = strip(1, 0)
+    second = strip(2, 3)
+
+    assert _small_horizontal_subset_match(first, second) is None
+
+    monkeypatch.setattr(
+        "medical_image_check.engines.image_similarity.SMALL_STRIP_SUBSET_MIN_DETAIL_CORRELATION",
+        -1.0,
+    )
+    coarse_match = _small_horizontal_subset_match(first, second)
+
+    assert coarse_match is not None
+    assert coarse_match.details["detail_residual_correlation_at_192x48"] < 0.88
+
+
+def test_horizontal_subset_verifier_requires_dedicated_candidate_shortlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "medical_image_check.engines.image_similarity._small_sift_match",
+        lambda *args, **kwargs: None,
+    )
+    height = 32
+    lane_width = 50
+
+    def lane(seed: int) -> np.ndarray:
+        random = np.random.default_rng(seed)
+        image = random.normal(225, 3, size=(height, lane_width)).astype(np.float32)
+        x = np.arange(lane_width, dtype=np.float32)[None, :]
+        y = np.arange(height, dtype=np.float32)[:, None]
+        band = np.exp(-(((y - 16) / 3.2) ** 2)) * np.exp(
+            -(((x - (25 + random.uniform(-3, 3))) / 18) ** 6)
+        )
+        image -= random.uniform(115, 155) * band
+        return np.clip(image, 0, 255).astype(np.uint8)
+
+    shared = [lane(1), lane(2)]
+    first_image = np.hstack([lane(8), *shared])
+    second_image = cv2.convertScaleAbs(np.hstack([lane(9), *shared, lane(10)]), alpha=0.9, beta=17)
+    features = [
+        extract_image_features_from_pages("first.png", (first_image,))[0],
+        extract_image_features_from_pages("second.png", (second_image,))[0],
+    ]
+    detector = ImageDuplicateDetector()
+
+    without_shortlist = detector._small_content_findings(
+        features,
+        set(),
+        supplemental_pairs={(0, 1)},
+        horizontal_subset_pairs=set(),
+    )
+    with_shortlist = detector._small_content_findings(
+        features,
+        set(),
+        supplemental_pairs={(0, 1)},
+        horizontal_subset_pairs={(0, 1)},
+    )
+
+    assert all(
+        finding.details.get("verification_method") != "dense_structure_horizontal_subset"
+        for finding in without_shortlist
+    )
+    assert len(with_shortlist) == 1
+    assert with_shortlist[0].details["verification_method"] == "dense_structure_horizontal_subset"
+
+
 def test_small_content_match_finds_mirrored_microscopy_crop() -> None:
     image = _synthetic_local_image(913)[120:240, 170:330]
     first_image = image[10:105, 12:145]
@@ -542,6 +808,7 @@ def test_small_content_match_finds_mirrored_microscopy_crop() -> None:
     match = _small_content_match(0, 1, first, second, {})
 
     assert match is not None
+    assert _sift_ranked_candidate_pairs([first, second], {(0, 1)}) == {(0, 1)}
     assert match.details["verification_method"] == "sift_geometry"
     assert match.details["inlier_count"] >= 6
 

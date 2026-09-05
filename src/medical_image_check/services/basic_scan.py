@@ -34,14 +34,15 @@ from medical_image_check.infrastructure.performance import (
 )
 from medical_image_check.services.panel_splitting import (
     PanelMaterialization,
+    prioritize_panel_findings,
     remap_panel_findings,
     remap_panel_issues,
 )
 
 ProgressCallback = Callable[[int, int, str], None]
 ALGORITHM_VERSION = (
-    "generic-image-local-3+western-blot-2+dot-blot-4+fluorescence-1+pathology-2+"
-    "panel-split-1+excel-advanced-4"
+    "generic-image-local-6+western-blot-3+dot-blot-5+fluorescence-2+pathology-3+"
+    "panel-split-4+panel-sift-fallback-2+panel-candidate-budget-1+excel-advanced-4"
 )
 
 
@@ -228,8 +229,18 @@ class BasicScanService:
                         mark_complete,
                         scan_control.checkpoint,
                         profiler,
+                        candidate_source_groups=materialization.candidate_source_groups,
                     )
                     image_findings = remap_panel_findings(image_findings, materialization)
+                    with profile_stage(profiler, "image.panel_candidate_budget"):
+                        image_findings, suppressed_panel_findings = prioritize_panel_findings(
+                            image_findings
+                        )
+                    record_items(
+                        profiler,
+                        "image.panel_candidate_budget",
+                        suppressed_panel_findings,
+                    )
                     image_issues = remap_panel_issues(image_issues, materialization)
                     image_issues.extend(materialization.issues)
             else:

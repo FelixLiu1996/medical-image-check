@@ -30,6 +30,9 @@ DOT_BLOT_INDEX_BUCKET_LIMIT = 32
 DOT_BLOT_PATCH_SIZE = 32
 DOT_BLOT_MIN_PROFILE_SIMILARITY = 0.60
 DOT_BLOT_MIN_APPEARANCE_SIMILARITY = 0.58
+AUTO_DOT_MIN_APPEARANCE_SIMILARITY = 0.64
+AUTO_DOT_MIN_SPOT_SIMILARITY = 0.44
+AUTO_DOT_SHORT_SEQUENCE_MAX_LAYOUT_ERROR = 0.055
 AUTO_DOT_GATE_MAX_DIMENSION = 512
 AUTO_DOT_GATE_MIN_DIMENSION = 48
 AUTO_DOT_GATE_MIN_ROUNDNESS = 0.70
@@ -141,6 +144,7 @@ class DotBlotDuplicateDetector:
         on_candidate_count: Callable[[int], None] | None = None,
         candidate_pair_limit: int | None = None,
         per_page_pair_limit: int | None = None,
+        strict_auto: bool = False,
     ) -> list[Finding]:
         best_by_page_pair: dict[
             tuple[str, str], tuple[DotBlotRegion, DotBlotRegion, _DotBlotMatch]
@@ -159,7 +163,7 @@ class DotBlotDuplicateDetector:
             first = regions[first_index]
             second = regions[second_index]
             page_pair = _page_pair_key(first, second)
-            match = _best_match(first, second)
+            match = _best_match(first, second, strict_auto=strict_auto)
             if match is None:
                 continue
             previous = best_by_page_pair.get(page_pair)
@@ -794,7 +798,12 @@ def _same_row_region(first: DotBlotRegion, second: DotBlotRegion) -> bool:
     return distance <= scale and 0.68 <= width_ratio <= 1.47
 
 
-def _best_match(first: DotBlotRegion, second: DotBlotRegion) -> _DotBlotMatch | None:
+def _best_match(
+    first: DotBlotRegion,
+    second: DotBlotRegion,
+    *,
+    strict_auto: bool = False,
+) -> _DotBlotMatch | None:
     best: _DotBlotMatch | None = None
     appearance_caches: dict[bool, _SequenceAppearanceCache] = {}
     first_layouts: dict[tuple[int, ...], tuple[float, ...]] = {}
@@ -875,6 +884,12 @@ def _best_match(first: DotBlotRegion, second: DotBlotRegion) -> _DotBlotMatch | 
                         appearance_cache,
                     )
                     if appearance < DOT_BLOT_MIN_APPEARANCE_SIMILARITY or minimum_spot < 0.34:
+                        continue
+                    if strict_auto and (
+                        appearance < AUTO_DOT_MIN_APPEARANCE_SIMILARITY
+                        or minimum_spot < AUTO_DOT_MIN_SPOT_SIMILARITY
+                        or (count <= 4 and error > AUTO_DOT_SHORT_SEQUENCE_MAX_LAYOUT_ERROR)
+                    ):
                         continue
                     if count == 3 and (
                         appearance < 0.68
