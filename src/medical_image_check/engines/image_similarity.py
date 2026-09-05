@@ -642,10 +642,21 @@ SMALL_STRUCTURE_SHIFT_LIMIT = 16
 SMALL_STRUCTURE_MAX_COLORFULNESS = 35.0
 SMALL_STRUCTURE_FINE_MAX_DIMENSION = 64
 SMALL_STRUCTURE_FINE_TRIGGER_HIGHPASS = 0.85
+SMALL_STRUCTURE_TRANSFORMS = (
+    "identity",
+    "flip_horizontal",
+    "flip_vertical",
+    "rotate_180",
+    "rotate_90",
+    "rotate_270",
+    "transpose",
+    "anti_transpose",
+)
 SMALL_STRIP_MIN_ASPECT_RATIO = 6.0
 SMALL_STRIP_MAX_HEIGHT = 160
 SMALL_STRIP_BORDER_TRIM_X = 0.04
 SMALL_STRIP_BORDER_TRIM_Y = 0.20
+SMALL_STRIP_TRANSFORM_TIE_TOLERANCE = 1e-5
 SMALL_STRIP_MIN_CONFIDENCE = 0.82
 SMALL_STRIP_MIN_GRAY_CORRELATION = 0.95
 SMALL_STRIP_MIN_HIGHPASS_CORRELATION = 0.78
@@ -1208,7 +1219,11 @@ def _small_elongated_border_match(
 
     first_trimmed, first_region = _trim_small_strip_border(first)
     second_trimmed, second_region = _trim_small_strip_border(second)
-    match = _small_structural_match(first_trimmed, second_trimmed)
+    match = _small_structural_match(
+        first_trimmed,
+        second_trimmed,
+        score_tolerance=SMALL_STRIP_TRANSFORM_TIE_TOLERANCE,
+    )
     if match is None:
         return None
     details = match.details
@@ -1491,6 +1506,8 @@ def _small_strip_band_component_count(image: NDArray[np.uint8]) -> int:
 def _small_structural_match(
     first: NDArray[np.uint8] | None,
     second: NDArray[np.uint8] | None,
+    transforms: tuple[str, ...] = SMALL_STRUCTURE_TRANSFORMS,
+    score_tolerance: float = 0.0,
 ) -> _SmallContentMatch | None:
     if first is None or second is None:
         return None
@@ -1509,16 +1526,7 @@ def _small_structural_match(
     first_highpass_template = first_highpass[inner]
     first_gradient_template = first_gradient[inner]
     best: tuple[float, float, float, str, int, int] | None = None
-    for transform in (
-        "identity",
-        "flip_horizontal",
-        "flip_vertical",
-        "rotate_180",
-        "rotate_90",
-        "rotate_270",
-        "transpose",
-        "anti_transpose",
-    ):
+    for transform in transforms:
         transformed = _small_transform(second, transform)
         second_resized = cv2.resize(transformed, (128, 128), interpolation=cv2.INTER_CUBIC)
         second_highpass = second_resized.astype(np.float32) - cv2.GaussianBlur(
@@ -1553,7 +1561,9 @@ def _small_structural_match(
             SMALL_STRUCTURE_SHIFT_LIMIT - location_x,
             SMALL_STRUCTURE_SHIFT_LIMIT - location_y,
         )
-        if best is None or _small_structure_score(candidate) > _small_structure_score(best):
+        if best is None or _small_structure_score(candidate) > (
+            _small_structure_score(best) + score_tolerance
+        ):
             best = candidate
     if best is None:
         return None
@@ -1562,8 +1572,15 @@ def _small_structural_match(
         max(first.shape + second.shape) <= SMALL_STRUCTURE_FINE_MAX_DIMENSION
         and highpass >= SMALL_STRUCTURE_FINE_TRIGGER_HIGHPASS
     ):
-        fine = _small_structural_fine_match(first_resized, second)
-        if fine is not None and _small_structure_score(fine) > _small_structure_score(best):
+        fine = _small_structural_fine_match(
+            first_resized,
+            second,
+            transforms=transforms,
+            score_tolerance=score_tolerance,
+        )
+        if fine is not None and _small_structure_score(fine) > (
+            _small_structure_score(best) + score_tolerance
+        ):
             best = fine
             gray, highpass, gradient, transform, offset_x, offset_y = best
     regular_match = (
@@ -1612,6 +1629,8 @@ def _small_structure_score(values: tuple[float, float, float, str, int, int]) ->
 def _small_structural_fine_match(
     first_resized: NDArray[np.uint8],
     second: NDArray[np.uint8],
+    transforms: tuple[str, ...] = SMALL_STRUCTURE_TRANSFORMS,
+    score_tolerance: float = 0.0,
 ) -> tuple[float, float, float, str, int, int] | None:
     first_highpass = first_resized.astype(np.float32) - cv2.GaussianBlur(
         first_resized.astype(np.float32),
@@ -1620,16 +1639,7 @@ def _small_structural_fine_match(
     )
     first_gradient = _gradient_magnitude(first_resized)
     best: tuple[float, float, float, str, int, int] | None = None
-    for transform in (
-        "identity",
-        "flip_horizontal",
-        "flip_vertical",
-        "rotate_180",
-        "rotate_90",
-        "rotate_270",
-        "transpose",
-        "anti_transpose",
-    ):
+    for transform in transforms:
         transformed = _small_transform(second, transform)
         second_resized = cv2.resize(transformed, (128, 128), interpolation=cv2.INTER_CUBIC)
         second_highpass = second_resized.astype(np.float32) - cv2.GaussianBlur(
@@ -1666,7 +1676,9 @@ def _small_structural_fine_match(
                     offset_x,
                     offset_y,
                 )
-                if best is None or _small_structure_score(candidate) > _small_structure_score(best):
+                if best is None or _small_structure_score(candidate) > (
+                    _small_structure_score(best) + score_tolerance
+                ):
                     best = candidate
     return best
 

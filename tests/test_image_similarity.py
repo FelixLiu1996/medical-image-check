@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
+import medical_image_check.engines.image_similarity as image_similarity
 from medical_image_check.domain.image_settings import ImageAnalysisMode
 from medical_image_check.domain.performance import RuntimeEnvironment
 from medical_image_check.engines.image_similarity import (
@@ -22,6 +23,7 @@ from medical_image_check.engines.image_similarity import (
     _sift_ranked_candidate_pairs,
     _small_candidate_pairs,
     _small_content_match,
+    _small_elongated_border_match,
     _small_horizontal_subset_match,
     _small_structural_match,
 )
@@ -632,7 +634,9 @@ def test_small_structural_match_finds_shifted_low_texture_strip() -> None:
     assert match.details["gradient_correlation"] >= 0.65
 
 
-def test_small_content_match_ignores_symmetric_frame_difference_for_long_strip() -> None:
+def test_small_content_match_ignores_symmetric_frame_difference_for_long_strip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     x = np.linspace(-1.0, 1.0, 300, dtype=np.float32)
     row = np.full((25, 300), 210, dtype=np.float32)
     for center, width, strength in zip(
@@ -656,14 +660,32 @@ def test_small_content_match_ignores_symmetric_frame_difference_for_long_strip()
     )
     first = extract_image_features_from_pages(Path("first-strip.png"), (first_image,))[0]
     second = extract_image_features_from_pages(Path("second-strip.png"), (second_image,))[0]
+    original_score = image_similarity._small_structure_score
+
+    def platform_biased_score(values: tuple[float, float, float, str, int, int]) -> float:
+        score = original_score(values)
+        return score + (5e-6 if values[3] == "flip_vertical" else 0.0)
+
+    monkeypatch.setattr(image_similarity, "_small_structure_score", platform_biased_score)
 
     match = _small_content_match(0, 1, first, second, {})
 
     assert match is not None
     assert match.details["verification_method"] == "dense_structure_border_trim"
+    assert match.details["transform_second_to_first"] in {"identity", "flip_horizontal"}
     assert match.details["gray_correlation"] >= 0.95
     assert match.details["highpass_correlation"] >= 0.78
     assert match.details["gradient_correlation"] >= 0.77
+
+
+def test_small_elongated_border_match_rejects_material_vertical_flip() -> None:
+    random = np.random.default_rng(20260906)
+    first = random.normal(205, 10, size=(40, 300)).clip(0, 255).astype(np.uint8)
+    first[9:14, 30:270] = np.minimum(first[9:14, 30:270], 70)
+    first[24:31, 80:220] = np.minimum(first[24:31, 80:220], 125)
+    second = cv2.flip(first, 0)
+
+    assert _small_elongated_border_match(first, second) is None
 
 
 def test_small_horizontal_subset_match_finds_reused_contiguous_lane_group() -> None:
